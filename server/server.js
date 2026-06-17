@@ -1,0 +1,263 @@
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const path = require('path');
+const EncryptionManager = require('./utils/encryption');
+require('dotenv').config();
+
+const { connectDB } = require('./db');
+const User = require('./models/User');
+const Conversation = require('./models/Conversation');
+const Message = require('./models/Message');
+
+const app = express();
+const server = http.createServer(app);
+
+// Configure Socket.io with CORS allowed and optimized settings
+const io = socketIo(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  },
+  // Optimize for calling applications
+  transports: ['websocket', 'polling'],
+  pingInterval: 30000, // Ping every 30 seconds
+  pingTimeout: 10000, // 10 second timeout
+  maxHttpBufferSize: 10e6, // 10MB buffer for large files
+  allowEIO3: true // Support older clients
+});
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '100mb' })); // Allow large uploads
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
+// Serve static uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Store active socket connections: userId -> socketId
+const activeSockets = {};
+// Store typing status: conversationId -> Set of typing users
+const typingUsers = new Map();
+
+// Socket.io real-time connection logic
+io.on('connection', (socket) => {
+  console.log(`Socket connected: ${socket.id}`);
+
+  // User joins with their identity
+  socket.on('join', async (userId) => {
+    if (!userId) return;
+    socket.userId = userId;
+    socket.join(`user_${userId}`); // Join personal room
+    activeSockets[userId] = socket.id;
+    console.log(`User joined: ${userId} on socket ${socket.id}`);
+
+    // Update online status in Database
+    try {
+      await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
+      io.emit('user_online', { userId, isOnline: true });
+    } catch (err) {
+      console.error('Error updating online status:', err);
+    }
+  });
+
+  // User joins a conversation room for real-time updates
+  socket.on('join_conversation', (conversationId) => {
+    socket.join(`conversation_${conversationId}`);
+    console.log(`User ${socket.userId} joined conversation ${conversationId}`);
+  });
+
+  // User leaves a conversation room
+  socket.on('leave_conversation', (conversationId) => {
+    socket.leave(`conversation_${conversationId}`);
+    console.log(`User ${socket.userId} left conversation ${conversationId}`);
+  });
+
+  // Typing indicator
+  socket.on('user_typing', (data) => {
+    // data = { conversationId, isTyping }
+    const conversationRoom = `conversation_${data.conversationId}`;
+    
+    if (data.isTyping) {
+      if (!typingUsers.has(data.conversationId)) {
+        typingUsers.set(data.conversationId, new Set());
+      }
+      typingUsers.get(data.conversationId).add(socket.userId);
+    } else {
+      if (typingUsers.has(data.conversationId)) {
+        typingUsers.get(data.conversationId).delete(socket.userId);
+        if (typingUsers.get(data.conversationId).size === 0) {
+          typingUsers.delete(data.conversationId);
+        }
+      }
+    }
+
+    io.to(conversationRoom).emit('typing_status', {
+      conversationId: data.conversationId,
+      typingUsers: Array.from(typingUsers.get(data.conversationId) || []),
+      isTyping: data.isTyping
+    });
+  });
+
+  // User is calling
+  socket.on('call_initiated', (data) => {
+    // data = { recipientId, callRoomId, callType }
+    io.to(`user_${data.recipientId}`).emit('incoming_call', {
+      callerId: socket.userId,
+      callRoomId: data.callRoomId,
+      callType: data.callType
+    });
+  });
+
+  // WebRTC Signaling with error handling
+  socket.on('webrtc_offer', (data) => {
+    try {
+      if (!data || !data.recipientId || !data.offer) {
+        console.error('[WebRTC Server] Invalid offer data:', data);
+        return;
+      }
+      console.log(`[WebRTC Server] Offer from ${socket.userId} to ${data.recipientId} for room ${data.callRoomId}`);
+      io.to(`user_${data.recipientId}`).emit('webrtc_offer', {
+        senderId: socket.userId,
+        offer: data.offer,
+        callRoomId: data.callRoomId
+      });
+    } catch (err) {
+      console.error('[WebRTC Server] Error handling offer:', err);
+    }
+  });
+
+  socket.on('webrtc_answer', (data) => {
+    try {
+      if (!data || !data.callerId || !data.answer) {
+        console.error('[WebRTC Server] Invalid answer data:', data);
+        return;
+      }
+      console.log(`[WebRTC Server] Answer from ${socket.userId} to ${data.callerId} for room ${data.callRoomId}`);
+      io.to(`user_${data.callerId}`).emit('webrtc_answer', {
+        senderId: socket.userId,
+        answer: data.answer,
+        callRoomId: data.callRoomId
+      });
+    } catch (err) {
+      console.error('[WebRTC Server] Error handling answer:', err);
+    }
+  });
+
+  socket.on('webrtc_ice_candidate', (data) => {
+    try {
+      if (!data || !data.candidate) {
+        console.error('[WebRTC Server] Invalid ICE candidate data:', data);
+        return;
+      }
+      const targetUser = data.isAnswer ? data.callerId : data.recipientId;
+      console.log(`[WebRTC Server] ICE candidate from ${socket.userId} to ${targetUser}`);
+      io.to(`user_${targetUser}`).emit('webrtc_ice_candidate', {
+        senderId: socket.userId,
+        candidate: data.candidate,
+        callRoomId: data.callRoomId
+      });
+    } catch (err) {
+      console.error('[WebRTC Server] Error handling ICE candidate:', err);
+    }
+  });
+
+  // User disconnects
+  socket.on('disconnect', async () => {
+    console.log(`Socket disconnected: ${socket.id}`);
+    if (socket.userId) {
+      delete activeSockets[socket.userId];
+      
+      // Update database status
+      try {
+        await User.findByIdAndUpdate(socket.userId, {
+          isOnline: false,
+          lastSeen: new Date()
+        });
+        io.emit('user_offline', {
+          userId: socket.userId,
+          isOnline: false,
+          lastSeen: new Date()
+        });
+      } catch (err) {
+        console.error('Error updating offline status:', err);
+      }
+    }
+  });
+});
+
+// Make io instance accessible in routes
+app.use((req, res, next) => {
+  req.io = io;
+  req.activeSockets = activeSockets;
+  next();
+});
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/conversations', require('./routes/conversations'));
+app.use('/api/messages', require('./routes/messages'));
+app.use('/api/status', require('./routes/status'));
+app.use('/api/calls', require('./routes/calls'));
+app.use('/api/upload', require('./routes/upload'));
+
+// Simple index status route
+app.get('/', (req, res) => {
+  res.json({ 
+    name: 'Project Nova API Server - WhatsApp Clone with E2E Encryption',
+    status: 'Running',
+    version: '1.0.0',
+    activeConnections: Object.keys(activeSockets).length,
+    features: [
+      '✅ End-to-End Encryption (NaCl/TweetNaCl)',
+      '✅ 1-on-1 & Group Chats (15 member limit)',
+      '✅ Voice & Video Calls (WebRTC)',
+      '✅ Status/Stories (24hr expiry)',
+      '✅ Read Receipts & Typing Indicators',
+      '✅ Message Search',
+      '✅ User Presence Tracking',
+      '✅ Auto-delete Messages (30 days)'
+    ]
+  });
+});
+
+// Seed Meta AI Bot on Database connection
+const seedMetaAI = async () => {
+  try {
+    let metaAI = await User.findOne({ username: 'meta_ai' });
+    if (!metaAI) {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash('meta_ai_password_secure_123', salt);
+      const encryptionKeys = EncryptionManager.generateKeyPair();
+      
+      metaAI = new User({
+        username: 'meta_ai',
+        password: hashedPassword,
+        displayName: 'Meta AI 🤖',
+        about: 'Nova AI Assistant. Ask me anything!',
+        avatarUrl: '',
+        publicKey: encryptionKeys.publicKey,
+        secretKey: encryptionKeys.secretKey
+      });
+      await metaAI.save();
+      console.log('--- Seeded Meta AI Bot User successfully ---');
+    }
+  } catch (err) {
+    console.error('Failed to seed Meta AI Bot:', err);
+  }
+};
+
+// Start Server
+const PORT = process.env.PORT || 5000;
+const startServer = async () => {
+  await connectDB();
+  await seedMetaAI();
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📱 WhatsApp Clone with E2E Encryption`);
+  });
+};
+
+startServer();

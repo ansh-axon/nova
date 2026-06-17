@@ -1,0 +1,49 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- TOP FLOATING TRIANGLE (PIECE 1) -->
+    <!-- Left Facet (Glowing Cyan) -->
+    <path
+        android:fillColor="#00F2FE"
+        android:pathData="M51,14 L38,36 L52,38 Z" />
+
+    <!-- Right Facet (Bright Electric Blue) -->
+    <path
+        android:fillColor="#00B0FF"
+        android:pathData="M51,14 L52,38 L77,60 Z" />
+
+    <!-- MAIN BOTTOM-LEFT TRIANGLE (PIECE 2) -->
+    <!-- Left Facet (Light Cyan-Teal) -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M15,87 L35,45 L46,68 Z" />
+
+    <!-- Right Facet (Ocean Blue) -->
+    <path
+        android:fillColor="#0091EA"
+        android:pathData="M35,45 L76,62 L46,68 Z" />
+
+    <!-- Bottom Facet (Deep Indigo Blue Shading) -->
+    <path
+        android:fillColor="#1A237E"
+        android:pathData="M15,87 L46,68 L76,62 Z" />
+
+    <!-- SMALL BOTTOM-RIGHT TRIANGLE (PIECE 3) -->
+    <!-- Left Facet (Cyan) -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M60,83 L80,71 L79,85 Z" />
+
+    <!-- Right Facet (Electric Deep Blue) -->
+    <path
+        android:fillColor="#3D5AFE"
+        android:pathData="M80,71 L94,95 L79,85 Z" />
+
+    <!-- Bottom Facet (Midnight Navy) -->
+    <path
+        android:fillColor="#0D47A1"
+        android:pathData="M60,83 L79,85 L94,95 Z" />
+</vector>

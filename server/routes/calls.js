@@ -1,0 +1,231 @@
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const Call = require('../models/Call');
+const Conversation = require('../models/Conversation');
+const User = require('../models/User');
+const { v4: uuidv4 } = require('uuid');
+
+// @route   GET api/calls/history
+// @desc    Get call history for the authenticated user
+router.get('/history', auth, async (req, res) => {
+  try {
+    const calls = await Call.find({
+      $or: [
+        { caller: req.user.id },
+        { receiver: req.user.id }
+      ]
+    })
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl')
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    res.json(calls);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error fetching call history' });
+  }
+});
+
+// @route   POST api/calls/initiate
+// @desc    Initiate a voice or video call
+router.post('/initiate', auth, async (req, res) => {
+  const { recipientId, callType, conversationId } = req.body;
+
+  if (!recipientId || !callType) {
+    return res.status(400).json({ message: 'Recipient ID and call type are required' });
+  }
+
+  if (!['voice', 'video'].includes(callType)) {
+    return res.status(400).json({ message: 'Call type must be voice or video' });
+  }
+
+  try {
+    const recipient = await User.findById(recipientId);
+    if (!recipient) {
+      return res.status(404).json({ message: 'Recipient not found' });
+    }
+
+    const callRoomId = uuidv4();
+    const signalingServer = process.env.SIGNALING_SERVER || 'ws://localhost:8080';
+
+    const call = new Call({
+      caller: req.user.id,
+      receiver: recipientId,
+      callType: callType,
+      conversation: conversationId || null,
+      callRoomId: callRoomId,
+      signalingServer: signalingServer,
+      status: 'ringing'
+    });
+
+    await call.save();
+
+    const populatedCall = await Call.findById(call._id)
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl');
+
+    // Notify receiver via Socket.io
+    req.io.to(`user_${recipientId}`).emit('incoming_call', populatedCall);
+
+    res.json(populatedCall);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error initiating call' });
+  }
+});
+
+// @route   GET api/calls/:callId
+// @desc    Get call by ID for synchronization
+router.get('/:callId', auth, async (req, res) => {
+  try {
+    const call = await Call.findById(req.params.callId)
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl');
+
+    if (!call) {
+      return res.status(404).json({ message: 'Call not found' });
+    }
+
+    res.json(call);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error fetching call' });
+  }
+});
+
+// @route   PUT api/calls/:callId/accept
+// @desc    Accept an incoming call
+router.put('/:callId/accept', auth, async (req, res) => {
+  try {
+    const call = await Call.findById(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ message: 'Call not found' });
+    }
+
+    if (call.receiver.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized to accept this call' });
+    }
+
+    call.status = 'accepted';
+    call.startedAt = new Date();
+    await call.save();
+
+    const populatedCall = await Call.findById(call._id)
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl');
+
+    // Notify caller
+    req.io.to(`user_${populatedCall.caller._id.toString()}`).emit('call_accepted', populatedCall);
+
+    res.json(populatedCall);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error accepting call' });
+  }
+});
+
+// @route   PUT api/calls/:callId/reject
+// @desc    Reject an incoming call
+router.put('/:callId/reject', auth, async (req, res) => {
+  try {
+    const call = await Call.findById(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ message: 'Call not found' });
+    }
+
+    if (call.receiver.toString() !== req.user.id && call.caller.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    call.status = 'rejected';
+    call.endedAt = new Date();
+    await call.save();
+
+    const populatedCall = await Call.findById(call._id)
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl');
+
+    // Notify the other party
+    if (call.caller.toString() === req.user.id) {
+      req.io.to(`user_${call.receiver.toString()}`).emit('call_rejected', populatedCall);
+    } else {
+      req.io.to(`user_${call.caller.toString()}`).emit('call_rejected', populatedCall);
+    }
+
+    res.json(populatedCall);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error rejecting call' });
+  }
+});
+
+// @route   PUT api/calls/:callId/end
+// @desc    End an ongoing call
+router.put('/:callId/end', auth, async (req, res) => {
+  const { callQuality } = req.body;
+
+  try {
+    const call = await Call.findById(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ message: 'Call not found' });
+    }
+
+    if (call.receiver.toString() !== req.user.id && call.caller.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    call.status = 'ended';
+    call.endedAt = new Date();
+    
+    if (call.startedAt) {
+      call.duration = Math.floor((call.endedAt - call.startedAt) / 1000);
+    }
+
+    if (callQuality) {
+      call.callQuality = callQuality;
+    }
+
+    await call.save();
+
+    const populatedCall = await Call.findById(call._id)
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl');
+
+    // Notify both parties
+    req.io.to(`user_${call.caller.toString()}`).emit('call_ended', populatedCall);
+    req.io.to(`user_${call.receiver.toString()}`).emit('call_ended', populatedCall);
+
+    res.json(populatedCall);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error ending call' });
+  }
+});
+
+// @route   PUT api/calls/:callId/missed
+// @desc    Mark call as missed
+router.put('/:callId/missed', auth, async (req, res) => {
+  try {
+    const call = await Call.findById(req.params.callId);
+    if (!call) {
+      return res.status(404).json({ message: 'Call not found' });
+    }
+
+    if (call.status !== 'ringing') {
+      return res.status(400).json({ message: 'Call is not ringing' });
+    }
+
+    call.status = 'missed';
+    call.endedAt = new Date();
+    await call.save();
+
+    res.json(call);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error marking call as missed' });
+  }
+});
+
+module.exports = router;
