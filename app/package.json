@@ -1,0 +1,49 @@
+{
+  "name": "nova-chat",
+  "main": "expo-router/entry",
+  "version": "1.0.0",
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "axios": "^1.6.2",
+    "expo": "~51.0.28",
+    "expo-av": "~14.0.7",
+    "expo-build-properties": "~0.12.5",
+    "expo-camera": "~15.0.16",
+    "expo-constants": "~16.0.2",
+    "expo-device": "~6.0.2",
+    "expo-document-picker": "~12.0.2",
+    "expo-file-system": "~17.0.1",
+    "expo-font": "~12.0.9",
+    "expo-image-picker": "~15.1.0",
+    "expo-linking": "~6.3.1",
+    "expo-router": "~3.5.23",
+    "expo-sharing": "~12.0.1",
+    "expo-splash-screen": "~0.27.2",
+    "expo-status-bar": "~1.12.1",
+    "expo-system-ui": "~3.0.7",
+    "expo-web-browser": "~13.0.3",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-gesture-handler": "~2.16.1",
+    "react-native-reanimated": "~3.10.1",
+    "react-native-safe-area-context": "4.10.5",
+    "react-native-screens": "~3.31.1",
+    "react-native-webrtc": "^118.0.0",
+    "@config-plugins/react-native-webrtc": "^9.0.0",
+    "socket.io-client": "^4.7.5",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "~18.2.45",
+    "typescript": "~5.3.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "private": true
+}

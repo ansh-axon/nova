@@ -1,0 +1,573 @@
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView } from 'react-native';
+import { showNeonAlert } from '../../components/NeonAlert';
+import { useApp } from '../../context/AppContext';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+
+export default function SettingsScreen() {
+  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts } = useApp();
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [about, setAbout] = useState(user?.about || '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+  const [updating, setUpdating] = useState(false);
+
+  const getInitials = (name: string) => {
+    return name ? name.charAt(0).toUpperCase() : '?';
+  };
+
+  const handlePickImage = async () => {
+    showNeonAlert({
+      title: 'PROFILE PICTURE',
+      message: 'Choose a source for your avatar:',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Camera', onPress: handleLaunchCamera },
+        { text: 'Gallery', onPress: handleLaunchGallery }
+      ],
+      icon: 'camera-outline',
+      iconColor: '#0df',
+      borderColor: '#0df',
+    });
+  };
+
+  const handleLaunchCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      showNeonAlert({
+        title: 'PERMISSION DENIED',
+        message: 'Camera access permission is required to take photos!',
+        icon: 'alert-circle-outline',
+        iconColor: '#f59e0b',
+        borderColor: '#f59e0b',
+      });
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.3,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      const base64Uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      setAvatarUrl(base64Uri);
+    }
+  };
+
+  const handleLaunchGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      showNeonAlert({
+        title: 'PERMISSION DENIED',
+        message: 'Gallery access permission is required to select photos!',
+        icon: 'alert-circle-outline',
+        iconColor: '#f59e0b',
+        borderColor: '#f59e0b',
+      });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.3,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      const base64Uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      setAvatarUrl(base64Uri);
+    }
+  };
+
+  const handlePickWallpaper = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      showNeonAlert({
+        title: 'PERMISSION DENIED',
+        message: 'Gallery access permission is required to select wallpapers!',
+        icon: 'alert-circle-outline',
+        iconColor: '#f59e0b',
+        borderColor: '#f59e0b',
+      });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.5,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      const base64Uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      await setChatWallpaper(base64Uri);
+      showNeonAlert({
+        title: 'WALLPAPER CHANGED',
+        message: 'Custom chat background wallpaper set successfully!',
+        icon: 'checkmark-circle-outline',
+        iconColor: '#10b981',
+        borderColor: '#10b981',
+      });
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!displayName.trim()) {
+      showNeonAlert({
+        title: 'VALIDATION ERROR',
+        message: 'Display Name cannot be empty',
+        icon: 'close-circle-outline',
+        iconColor: '#f43f5e',
+        borderColor: '#f43f5e',
+      });
+      return;
+    }
+
+    setUpdating(true);
+    const success = await updateProfile(displayName.trim(), about.trim(), avatarUrl);
+    setUpdating(false);
+
+    if (success) {
+      showNeonAlert({
+        title: 'SUCCESS',
+        message: 'Profile details updated successfully!',
+        buttons: [{ text: 'OK' }],
+        icon: 'checkmark-circle-outline',
+        iconColor: '#10b981',
+        borderColor: '#10b981',
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    showNeonAlert({
+      title: 'LOG OUT',
+      message: 'Are you sure you want to log out of Nova?',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log Out', style: 'destructive', onPress: logout }
+      ],
+      icon: 'log-out-outline',
+      iconColor: '#f43f5e',
+      borderColor: '#f43f5e',
+    });
+  };
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      {/* Profile Picture Header Section */}
+      <View style={styles.avatarSection}>
+        <TouchableOpacity style={styles.avatarWrapper} onPress={handlePickImage}>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatarFallback, { backgroundColor: '#0df' }]}>
+              <Text style={styles.avatarFallbackText}>{getInitials(displayName || 'U')}</Text>
+            </View>
+          )}
+          <View style={styles.cameraIconBg}>
+            <Ionicons name="camera" size={18} color="#090d16" />
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.usernameText}>@{user?.username}</Text>
+        <Text style={styles.profileTip}>Tap avatar circle to change picture</Text>
+      </View>
+
+      {/* Profile Fields Section */}
+      <View style={styles.formContainer}>
+        {/* Display Name Input */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Display Name</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="person-outline" size={20} color="#64748b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Display Name"
+              placeholderTextColor="#475569"
+              value={displayName}
+              onChangeText={setDisplayName}
+              autoCorrect={false}
+            />
+          </View>
+        </View>
+
+        {/* About Status Input */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>About Status</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="sparkles-outline" size={20} color="#64748b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="About Status"
+              placeholderTextColor="#475569"
+              value={about}
+              onChangeText={setAbout}
+            />
+          </View>
+        </View>
+
+        {/* Save Button */}
+        <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile} disabled={updating}>
+          {updating ? (
+            <ActivityIndicator color="#090d16" />
+          ) : (
+            <>
+              <Ionicons name="checkmark-sharp" size={18} color="#090d16" style={{ marginRight: 6 }} />
+              <Text style={styles.saveButtonText}>Save Details</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* Matrix Personalisation Section */}
+        <View style={styles.personalizationSection}>
+          <Text style={styles.sectionHeaderTitle}>Matrix Personalisation</Text>
+
+          {/* Chat Background Wallpaper */}
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingTitle}>Chat Wallpaper</Text>
+              <Text style={styles.settingSubtitle}>
+                {chatWallpaper ? 'Custom matrix wallpaper active' : 'Default deep space canvas active'}
+              </Text>
+            </View>
+            <View style={styles.wallpaperButtons}>
+              <TouchableOpacity style={styles.miniBtn} onPress={handlePickWallpaper}>
+                <Ionicons name="image-outline" size={16} color="#0df" />
+                <Text style={styles.miniBtnText}>Select</Text>
+              </TouchableOpacity>
+              {chatWallpaper && (
+                <TouchableOpacity style={[styles.miniBtn, { borderColor: '#ef4444', marginLeft: 8 }]} onPress={() => setChatWallpaper(null)}>
+                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Cyber Call Ringtone */}
+          <View style={styles.settingRowCol}>
+            <Text style={styles.settingTitleCol}>Secure Holographic Ringtone</Text>
+            <View style={styles.ringtoneList}>
+              {['Neon Horizon', 'Interstellar Pulsar', 'Quantum Cyber-synth'].map((rt) => (
+                <TouchableOpacity
+                  key={rt}
+                  style={[
+                    styles.ringtoneCard,
+                    selectedRingtone === rt && styles.ringtoneCardActive
+                  ]}
+                  onPress={() => setSelectedRingtone(rt)}
+                >
+                  <Ionicons
+                    name={selectedRingtone === rt ? 'musical-notes' : 'musical-note-outline'}
+                    size={16}
+                    color={selectedRingtone === rt ? '#090d16' : '#94a3b8'}
+                  />
+                  <Text style={[
+                    styles.ringtoneText,
+                    selectedRingtone === rt && { color: '#090d16', fontWeight: '700' }
+                  ]}>
+                    {rt}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Privacy Toggles */}
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingTitle}>Broadcast Online Status</Text>
+              <Text style={styles.settingSubtitle}>Show online presence & last seen</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggleSwitch, privacyLastSeen && styles.toggleSwitchActive]}
+              onPress={() => setPrivacyLastSeen(!privacyLastSeen)}
+            >
+              <View style={[styles.toggleCircle, privacyLastSeen && styles.toggleCircleActive]} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingTitle}>Read Receipts (Blue Ticks)</Text>
+              <Text style={styles.settingSubtitle}>Grey receipts show if deactivated</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggleSwitch, privacyReadReceipts && styles.toggleSwitchActive]}
+              onPress={() => setPrivacyReadReceipts(!privacyReadReceipts)}
+            >
+              <View style={[styles.toggleCircle, privacyReadReceipts && styles.toggleCircleActive]} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Log Out Button */}
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20} color="#ef4444" style={{ marginRight: 8 }} />
+          <Text style={styles.logoutButtonText}>Log Out Account</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#090d16',
+  },
+  scrollContent: {
+    padding: 24,
+    paddingBottom: 40,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+    marginTop: 10,
+  },
+  avatarWrapper: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#0df',
+  },
+  avatarFallback: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#0df',
+  },
+  avatarFallbackText: {
+    color: '#090d16',
+    fontSize: 48,
+    fontWeight: '900',
+  },
+  cameraIconBg: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#0df',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#090d16',
+    shadowColor: '#0df',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  usernameText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0df',
+    letterSpacing: 0.5,
+  },
+  profileTip: {
+    fontSize: 12,
+    color: '#475569',
+    marginTop: 6,
+  },
+  formContainer: {
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  label: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    letterSpacing: 1,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(2, 6, 23, 0.5)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 16,
+    height: 52,
+  },
+  inputIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    color: '#f8fafc',
+    fontSize: 15,
+    height: '100%',
+  },
+  saveButton: {
+    flexDirection: 'row',
+    backgroundColor: '#0df',
+    borderRadius: 12,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+    shadowColor: '#0df',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  saveButtonText: {
+    color: '#090d16',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+    borderRadius: 12,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  logoutButtonText: {
+    color: '#ef4444',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  personalizationSection: {
+    marginTop: 28,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    paddingTop: 24,
+  },
+  sectionHeaderTitle: {
+    color: '#0df',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 16,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.02)',
+  },
+  settingInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  settingTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  settingSubtitle: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  wallpaperButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  miniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 221, 255, 0.25)',
+    backgroundColor: 'rgba(0, 221, 255, 0.02)',
+  },
+  miniBtnText: {
+    color: '#0df',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  settingRowCol: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.02)',
+  },
+  settingTitleCol: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  ringtoneList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  ringtoneCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  ringtoneCardActive: {
+    backgroundColor: '#0df',
+    borderColor: '#0df',
+  },
+  ringtoneText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  toggleSwitch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#1e293b',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#0df',
+  },
+  toggleCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#94a3b8',
+  },
+  toggleCircleActive: {
+    backgroundColor: '#090d16',
+    transform: [{ translateX: 20 }],
+  },
+});
