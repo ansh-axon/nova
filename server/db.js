@@ -1,20 +1,18 @@
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
-
-let mongoServer;
 
 const connectDB = async () => {
+  const uri = process.env.MONGODB_URI;
+
+  if (!uri) {
+    console.error('MONGODB_URI is not set. Add it to your server/.env file.');
+    process.exit(1);
+  }
+
   try {
-    mongoServer = await MongoMemoryServer.create({
-      instance: {
-        dbName: 'nova-chat'
-      }
-    });
-    const uri = mongoServer.getUri();
     await mongoose.connect(uri);
-    console.log(`MongoDB Memory Server started & connected at: ${uri}`);
+    console.log('MongoDB Atlas connected successfully');
   } catch (err) {
-    console.error('Failed to connect to MongoDB Memory Server:', err);
+    console.error('Failed to connect to MongoDB Atlas:', err.message);
     process.exit(1);
   }
 };
@@ -22,9 +20,6 @@ const connectDB = async () => {
 const disconnectDB = async () => {
   try {
     await mongoose.disconnect();
-    if (mongoServer) {
-      await mongoServer.stop();
-    }
   } catch (err) {
     console.error('Error disconnecting database:', err);
   }
