@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const EncryptionManager = require('../utils/encryption');
-const { sendCodeEmail, generateCode, testMailer } = require('../utils/mailer');
+const { sendCodeEmail, generateCode } = require('../utils/mailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'nova_chat_secret_key';
 const CODE_TTL_MS = 10 * 60 * 1000; // codes expire in 10 minutes
@@ -28,19 +28,6 @@ function issueAuth(user) {
 }
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-// @route   GET api/auth/_maildebug?to=someone@example.com
-// @desc    TEMP diagnostic: verifies SMTP and optionally sends a test email.
-//          Returns the exact SMTP error so email issues can be diagnosed.
-router.get('/_maildebug', async (req, res) => {
-  try {
-    const to = req.query.to;
-    const result = await testMailer(to);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // @route   POST api/auth/register
 // @desc    Register a new user, then email a verification OTP (no login until verified)
