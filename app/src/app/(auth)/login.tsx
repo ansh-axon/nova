@@ -182,7 +182,7 @@ export default function LoginScreen() {
           {/* Premium security footer */}
           <View style={styles.secureFooter}>
             <Ionicons name="lock-closed" size={12} color="#334155" />
-            <Text style={styles.secureFooterText}>End-to-end encrypted · Private by design</Text>
+            <Text style={styles.secureFooterText}>Encrypted & private by design</Text>
           </View>
         </Animated.View>
       </ScrollView>

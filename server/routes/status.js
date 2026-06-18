@@ -88,8 +88,13 @@ router.post('/', auth, async (req, res) => {
       .populate('user', 'username displayName avatarUrl')
       .populate('viewers.user', 'username displayName avatarUrl');
 
-    // Emit to Socket.io - notify contacts about new status
-    req.io.emit('new_status', populatedStatus);
+    // Emit to Socket.io. A 'private' status must NOT be broadcast to everyone —
+    // only push it to the owner. public/contacts go out as a live update.
+    if ((privacy || 'contacts') === 'private') {
+      req.io.to(`user_${req.user.id}`).emit('new_status', populatedStatus);
+    } else {
+      req.io.emit('new_status', populatedStatus);
+    }
 
     res.json(populatedStatus);
   } catch (err) {

@@ -44,6 +44,12 @@ const ConversationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  // Per-user soft delete: users who have cleared this 1-on-1 chat from their
+  // own list. The conversation stays intact for the other participant.
+  deletedFor: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   // Participant status
   participantStatus: [{
     user: {

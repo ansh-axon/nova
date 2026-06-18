@@ -259,7 +259,7 @@ function GlobalCallHost() {
         {/* Secure indicator */}
         <View style={styles.modalHeaderSec}>
           <Ionicons name="lock-closed" size={14} color="rgba(0, 221, 255, 0.4)" style={{ marginRight: 6 }} />
-          <Text style={styles.modalSecText}>E2E SECURE LINK ACTIVE</Text>
+          <Text style={styles.modalSecText}>SECURE LINK ACTIVE</Text>
         </View>
 
         {/* Avatar section */}

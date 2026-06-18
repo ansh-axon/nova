@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'nova_chat_secret_key';
+const { JWT_SECRET } = require('../config');
 
 module.exports = function(req, res, next) {
   // Get token from header

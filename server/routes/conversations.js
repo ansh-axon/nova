@@ -10,7 +10,8 @@ const EncryptionManager = require('../utils/encryption');
 router.get('/', auth, async (req, res) => {
   try {
     const conversations = await Conversation.find({
-      participants: req.user.id
+      participants: req.user.id,
+      deletedFor: { $ne: req.user.id }
     })
       .populate('participants', 'username displayName about avatarUrl isOnline lastSeen')
       .populate('groupAdmin', 'username displayName avatarUrl')
@@ -298,8 +299,19 @@ router.delete('/:conversationId', auth, async (req, res) => {
       conversation.participantStatus = conversation.participantStatus.filter(p => p.user.toString() !== req.user.id);
       await conversation.save();
     } else {
-      // 1-on-1 conversation deleted for this user
-      await Conversation.findByIdAndDelete(req.params.conversationId);
+      // 1-on-1: soft-delete for THIS user only, so the other participant keeps
+      // their copy + history. Only hard-delete once both have cleared it.
+      if (!conversation.deletedFor.some(id => id.toString() === req.user.id)) {
+        conversation.deletedFor.push(req.user.id);
+      }
+      const everyoneDeleted = conversation.participants.every(p =>
+        conversation.deletedFor.some(d => d.toString() === p.toString())
+      );
+      if (everyoneDeleted) {
+        await Conversation.findByIdAndDelete(req.params.conversationId);
+      } else {
+        await conversation.save();
+      }
     }
 
     res.json({ message: 'Conversation deleted/left' });

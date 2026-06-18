@@ -540,7 +540,7 @@ export default function BentoDashboardScreen() {
                     </Text>
                   )}
                   {!vaultErrorMessage && isChangingPinMode && (
-                    <Text style={styles.tipText}>Current registered PIN is {vaultPin}</Text>
+                    <Text style={styles.tipText}>Enter a new 4-digit PIN to update your vault.</Text>
                   )}
                 </View>
 

@@ -2,12 +2,32 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
 const EncryptionManager = require('../utils/encryption');
 const { sendCodeEmail, generateCode } = require('../utils/mailer');
+const auth = require('../middleware/auth');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'nova_chat_secret_key';
+const { JWT_SECRET } = require('../config');
 const CODE_TTL_MS = 10 * 60 * 1000; // codes expire in 10 minutes
+
+// ── Rate limiters (brute-force protection) ──────────────────────────────
+// Generous enough for real users, tight enough to stop scripted abuse.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,                      // login/register attempts per IP / 15 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many attempts. Please try again in a few minutes.' },
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 12,                      // OTP verify / reset guesses per IP / 15 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many attempts. Please wait a few minutes and try again.' },
+});
 
 // Issues a signed JWT and returns the standard auth payload
 function issueAuth(user) {
@@ -31,7 +51,7 @@ const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 // @route   POST api/auth/register
 // @desc    Register a new user, then email a verification OTP (no login until verified)
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   const { username, password, email, deviceId } = req.body;
 
   if (!username || !password || !email) {
@@ -98,7 +118,7 @@ router.post('/register', async (req, res) => {
 
 // @route   POST api/auth/verify-otp
 // @desc    Verify the email OTP and activate the account (returns token)
-router.post('/verify-otp', async (req, res) => {
+router.post('/verify-otp', otpLimiter, async (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) {
     return res.status(400).json({ message: 'Email and code are required' });
@@ -133,7 +153,7 @@ router.post('/verify-otp', async (req, res) => {
 
 // @route   POST api/auth/resend-otp
 // @desc    Resend a verification code
-router.post('/resend-otp', async (req, res) => {
+router.post('/resend-otp', authLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'Email is required' });
 
@@ -157,7 +177,7 @@ router.post('/resend-otp', async (req, res) => {
 
 // @route   POST api/auth/login
 // @desc    Authenticate user; blocks unverified accounts
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ message: 'Please enter username and password' });
@@ -192,7 +212,7 @@ router.post('/login', async (req, res) => {
 
 // @route   POST api/auth/forgot-password
 // @desc    Email a password reset code
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', authLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'Email is required' });
 
@@ -215,7 +235,7 @@ router.post('/forgot-password', async (req, res) => {
 
 // @route   POST api/auth/reset-password
 // @desc    Reset password using the emailed code
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', otpLimiter, async (req, res) => {
   const { email, code, newPassword } = req.body;
   if (!email || !code || !newPassword) {
     return res.status(400).json({ message: 'Email, code and new password are required' });
@@ -250,8 +270,8 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // @route   GET api/auth/user-keys/:userId
-// @desc    Get user's public key for encryption
-router.get('/user-keys/:userId', async (req, res) => {
+// @desc    Get user's public key for encryption (auth required to prevent enumeration)
+router.get('/user-keys/:userId', auth, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).select('publicKey username displayName avatarUrl');
     if (!user) {

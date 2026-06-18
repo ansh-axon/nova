@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import EncryptionUtils from './encryption';
+import { getToken, setToken } from './tokenStore';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -16,7 +17,7 @@ const api = axios.create({
 // Add token to requests
 api.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -32,7 +33,7 @@ export const authAPI = {
   register: async (username: string, password: string) => {
     const res = await api.post('/auth/register', { username, password });
     // Store token and user keys
-    await AsyncStorage.setItem('token', res.data.token);
+    await setToken(res.data.token);
     await AsyncStorage.setItem('userId', res.data.user.id);
     await AsyncStorage.setItem('publicKey', res.data.user.publicKey);
     return res.data;
@@ -41,7 +42,7 @@ export const authAPI = {
   login: async (username: string, password: string) => {
     const res = await api.post('/auth/login', { username, password });
     // Store token and user keys
-    await AsyncStorage.setItem('token', res.data.token);
+    await setToken(res.data.token);
     await AsyncStorage.setItem('userId', res.data.user.id);
     await AsyncStorage.setItem('publicKey', res.data.user.publicKey);
     return res.data;

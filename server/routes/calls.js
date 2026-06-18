@@ -88,6 +88,13 @@ router.get('/:callId', auth, async (req, res) => {
       return res.status(404).json({ message: 'Call not found' });
     }
 
+    // Only the caller or receiver may view a call record (prevents IDOR).
+    const callerId = call.caller && (call.caller._id ? call.caller._id.toString() : call.caller.toString());
+    const receiverId = call.receiver && (call.receiver._id ? call.receiver._id.toString() : call.receiver.toString());
+    if (callerId !== req.user.id && receiverId !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized to view this call' });
+    }
+
     res.json(call);
   } catch (err) {
     console.error(err);

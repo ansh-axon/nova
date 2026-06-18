@@ -37,6 +37,17 @@ router.get('/me', auth, async (req, res) => {
 router.put('/profile', auth, async (req, res) => {
   const { displayName, about, avatarUrl } = req.body;
 
+  // Guard against oversized / abusive payloads (avatar is stored as base64 in DB).
+  if (typeof displayName === 'string' && displayName.length > 100) {
+    return res.status(400).json({ message: 'Display name is too long (max 100 characters).' });
+  }
+  if (typeof about === 'string' && about.length > 300) {
+    return res.status(400).json({ message: 'About is too long (max 300 characters).' });
+  }
+  if (typeof avatarUrl === 'string' && avatarUrl.length > 3_000_000) {
+    return res.status(400).json({ message: 'Avatar image is too large. Please choose a smaller image.' });
+  }
+
   const updateFields = {};
   if (displayName !== undefined) updateFields.displayName = displayName;
   if (about !== undefined) updateFields.about = about;

@@ -31,10 +31,18 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors());
+// Render (and most hosts) run the app behind a reverse proxy. Trust the first
+// proxy hop so rate limiting and req.ip use the real client IP, not the proxy's.
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '100mb' })); // Allow large uploads
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
-// Serve static uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve static uploads. nosniff stops browsers from MIME-sniffing a file into
+// an executable type; inline disposition is fine because executable types are
+// blocked at upload time.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+}, express.static(path.join(__dirname, 'uploads')));
 
 // Store active socket connections: userId -> socketId
 const activeSockets = {};
@@ -43,13 +51,53 @@ const typingUsers = new Map();
 // Store group/meeting call rooms: roomId -> Set of userIds currently in the call (mesh)
 const groupRooms = {};
 
+// ── Socket authentication ──────────────────────────────────────────────
+// New app builds present a JWT in the handshake; the authenticated user id is
+// then derived from the verified token (socket.authUserId) so clients cannot
+// impersonate other users.
+//
+// TRANSITIONAL: connections WITHOUT a token are still allowed for now so that
+// older installed app builds keep working until everyone updates. Once the new
+// build is rolled out, set SOCKET_AUTH_STRICT=true to reject tokenless sockets
+// and fully close the impersonation gap.
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('./config');
+const SOCKET_AUTH_STRICT = process.env.SOCKET_AUTH_STRICT === 'true';
+
+io.use((socket, next) => {
+  const token =
+    (socket.handshake.auth && socket.handshake.auth.token) ||
+    (socket.handshake.headers && socket.handshake.headers['x-auth-token']);
+
+  if (!token) {
+    if (SOCKET_AUTH_STRICT) return next(new Error('Authentication required'));
+    return next(); // legacy client — allowed during transition
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const uid = decoded && decoded.user && decoded.user.id;
+    if (uid) socket.authUserId = String(uid);
+    else if (SOCKET_AUTH_STRICT) return next(new Error('Invalid token'));
+    next();
+  } catch (err) {
+    if (SOCKET_AUTH_STRICT) return next(new Error('Authentication failed'));
+    next(); // invalid token but transition mode — fall back to legacy identity
+  }
+});
+
 // Socket.io real-time connection logic
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  // User joins with their identity
-  socket.on('join', async (userId) => {
+  // User joins with their identity.
+  // SECURITY: prefer the verified JWT identity (socket.authUserId). The
+  // client-sent value is only used as a fallback for legacy (tokenless) clients.
+  socket.on('join', async (clientUserId) => {
+    const userId = socket.authUserId || (clientUserId && String(clientUserId));
     if (!userId) return;
+    if (socket.authUserId && clientUserId && String(clientUserId) !== socket.authUserId) {
+      console.warn(`[Socket] join userId mismatch: token=${socket.authUserId} client=${clientUserId} — using token id`);
+    }
     socket.userId = userId;
     socket.join(`user_${userId}`); // Join personal room
     activeSockets[userId] = socket.id;
@@ -308,12 +356,12 @@ app.use('/api/upload', require('./routes/upload'));
 // Simple index status route
 app.get('/', (req, res) => {
   res.json({ 
-    name: 'Project Nova API Server - WhatsApp Clone with E2E Encryption',
+    name: 'Project Nova API Server',
     status: 'Running',
     version: '1.0.0',
     activeConnections: Object.keys(activeSockets).length,
     features: [
-      '✅ End-to-End Encryption (NaCl/TweetNaCl)',
+      '✅ Encrypted in transit (HTTPS/TLS) & secured at rest',
       '✅ 1-on-1 & Group Chats (15 member limit)',
       '✅ Voice & Video Calls (WebRTC)',
       '✅ Status/Stories (24hr expiry)',
@@ -364,7 +412,7 @@ const startServer = async () => {
   await seedMetaAI();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📱 WhatsApp Clone with E2E Encryption`);
+    console.log(`🔐 NOVA secure messaging server`);
   });
 };
 

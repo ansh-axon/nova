@@ -17,13 +17,29 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter to restrict uploads to allowed image, video, and document types
+// File filter: allow common media/docs, but BLOCK types that can execute in a
+// browser context (HTML/SVG/XHTML) since /uploads is publicly served — this
+// prevents stored-XSS via a malicious "image".
+const BLOCKED_MIME = new Set([
+  'text/html', 'application/xhtml+xml', 'image/svg+xml',
+  'application/xml', 'text/xml', 'application/x-msdownload',
+  'application/javascript', 'text/javascript',
+]);
+const BLOCKED_EXT = new Set([
+  '.html', '.htm', '.xhtml', '.svg', '.xml', '.js', '.mjs', '.exe', '.bat', '.sh', '.htaccess',
+]);
+
 const fileFilter = (req, file, cb) => {
-  const mimetype = file.mimetype.toLowerCase();
-  
+  const mimetype = (file.mimetype || '').toLowerCase();
+  const ext = path.extname(file.originalname || '').toLowerCase();
+
+  if (BLOCKED_MIME.has(mimetype) || BLOCKED_EXT.has(ext)) {
+    return cb(new Error('This file type is not allowed for security reasons.'), false);
+  }
+
   const allowedPrefixes = ['image/', 'video/', 'audio/', 'text/', 'application/'];
   const isAllowed = allowedPrefixes.some(prefix => mimetype.startsWith(prefix));
-  
+
   if (isAllowed) {
     cb(null, true);
   } else {

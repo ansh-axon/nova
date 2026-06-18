@@ -71,7 +71,7 @@ export default function StatusScreen() {
           _id: 'nova_ai_1',
           statusType: 'image',
           mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
-          textContent: '🚀 Welcome to Project NOVA! Tap left or right to traverse neural nodes. End-to-end status security is verified.',
+          textContent: '🚀 Welcome to Project NOVA! Tap left or right to traverse neural nodes. Your private space is ready.',
           backgroundColor: '#0c4a6e',
           createdAt: new Date().toISOString(),
           viewers: []

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io, Socket } from 'socket.io-client';
 import { showNeonAlert } from '../components/NeonAlert';
 import { getIceServers, getIceServersSync } from '../utils/iceConfig';
+import { getToken, setToken as secureSetToken, deleteToken } from '../utils/tokenStore';
 
 export interface User {
   id: string;
@@ -841,7 +842,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           await AsyncStorage.setItem('serverUrl', defaultUrl);
         }
         
-        const storedToken = await AsyncStorage.getItem('token');
+        const storedToken = await getToken();
         const storedUser = await AsyncStorage.getItem('user');
         
         if (storedToken && storedUser) {
@@ -891,6 +892,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const socketInstance = io(serverUrl, {
       transports: ['websocket'],
       forceNew: true,
+      // Authenticate the socket with the JWT so the server can trust our identity.
+      auth: { token },
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
@@ -1387,7 +1390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setToken(data.token);
     setUser(formattedUser);
-    await AsyncStorage.setItem('token', data.token);
+    await secureSetToken(data.token);
     await AsyncStorage.setItem('user', JSON.stringify(formattedUser));
   };
 
@@ -1524,7 +1527,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMessages({});
     setActiveConversationId(null);
 
-    await AsyncStorage.removeItem('token');
+    await deleteToken();
     await AsyncStorage.removeItem('user');
   };
 

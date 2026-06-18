@@ -43,9 +43,13 @@ router.post('/search', auth, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
+    // Escape regex special chars so user input is treated as a literal string
+    // (prevents ReDoS / catastrophic backtracking and regex injection).
+    const safeQuery = String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     const messages = await Message.find({
       conversation: conversationId,
-      text: { $regex: query, $options: 'i' }
+      text: { $regex: safeQuery, $options: 'i' }
     })
       .populate('sender', 'username displayName avatarUrl')
       .sort({ createdAt: -1 })
@@ -111,6 +115,10 @@ router.post('/', auth, async (req, res) => {
 
     // Update conversation lastMessage
     conversation.lastMessage = message._id;
+    // A new message revives the chat for anyone who had cleared it.
+    if (Array.isArray(conversation.deletedFor) && conversation.deletedFor.length > 0) {
+      conversation.deletedFor = [];
+    }
     await conversation.save();
 
     const populatedMessage = await Message.findById(message._id)
