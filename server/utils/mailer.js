@@ -87,4 +87,48 @@ function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-module.exports = { sendCodeEmail, generateCode };
+// Diagnostic helper: verifies SMTP connection/auth and (optionally) sends a test
+// email, returning a detailed result instead of throwing. Used by a debug route.
+async function testMailer(to) {
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
+  const result = {
+    emailUserSet: !!user,
+    emailPassSet: !!pass,
+    emailUser: user || null,
+    passLength: pass ? pass.replace(/\s+/g, '').length : 0,
+    verify: null,
+    send: null,
+  };
+
+  const t = getTransporter();
+  if (!t) {
+    result.verify = 'NO_TRANSPORTER (EMAIL_USER/EMAIL_PASS missing)';
+    return result;
+  }
+
+  try {
+    await t.verify();
+    result.verify = 'OK';
+  } catch (err) {
+    result.verify = `FAIL: ${err.code || ''} ${err.message}`;
+    return result;
+  }
+
+  if (to) {
+    try {
+      const info = await t.sendMail({
+        from: process.env.EMAIL_FROM || `NOVA <${process.env.EMAIL_USER}>`,
+        to,
+        subject: 'NOVA SMTP Test',
+        text: 'This is a NOVA SMTP test email. If you received this, email sending works.',
+      });
+      result.send = `OK (id: ${info.messageId})`;
+    } catch (err) {
+      result.send = `FAIL: ${err.code || ''} ${err.message}`;
+    }
+  }
+  return result;
+}
+
+module.exports = { sendCodeEmail, generateCode, testMailer };
