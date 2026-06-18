@@ -4,9 +4,12 @@ import { showNeonAlert } from '../../components/NeonAlert';
 import { useApp } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import { Audio } from 'expo-av';
 
 export default function SettingsScreen() {
-  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts } = useApp();
+  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, customTones, setCustomTone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts } = useApp();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [about, setAbout] = useState(user?.about || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
@@ -161,6 +164,70 @@ export default function SettingsScreen() {
 
   const SUPPORT_EMAIL = 'nova.verifying@gmail.com';
 
+  // ── Custom tone selection (call ringtone / message tone / group tone) ──
+  const [previewSound, setPreviewSound] = useState<Audio.Sound | null>(null);
+  const [busyTone, setBusyTone] = useState<string | null>(null);
+
+  const TONES_DIR = FileSystem.documentDirectory + 'tones/';
+
+  const ensureTonesDir = async () => {
+    const info = await FileSystem.getInfoAsync(TONES_DIR);
+    if (!info.exists) {
+      await FileSystem.makeDirectoryAsync(TONES_DIR, { intermediates: true });
+    }
+  };
+
+  const toneLabels: Record<'call' | 'message' | 'group', string> = {
+    call: 'Call Ringtone',
+    message: 'Message Tone',
+    group: 'Group Message Tone',
+  };
+
+  const handlePickTone = async (kind: 'call' | 'message' | 'group') => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true, multiple: false });
+      if (res.canceled || !res.assets || !res.assets[0]) return;
+      const asset = res.assets[0];
+      setBusyTone(kind);
+      await ensureTonesDir();
+      // Copy into the app's persistent storage so the URI survives app restarts.
+      const safeName = (asset.name || 'tone.mp3').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const dest = `${TONES_DIR}${kind}_${Date.now()}_${safeName}`;
+      await FileSystem.copyAsync({ from: asset.uri, to: dest });
+      await setCustomTone(kind, { uri: dest, name: asset.name || safeName });
+      showNeonAlert({
+        title: 'TONE SET',
+        message: `${toneLabels[kind]} set to "${asset.name || safeName}".`,
+        icon: 'musical-notes-outline', iconColor: '#10b981', borderColor: '#10b981',
+      });
+    } catch (e: any) {
+      console.error('Tone pick error:', e);
+      showNeonAlert({ title: 'COULD NOT SET TONE', message: 'Failed to set this audio file. Please try another.', icon: 'alert-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+    } finally {
+      setBusyTone(null);
+    }
+  };
+
+  const handlePreviewTone = async (uri: string) => {
+    try {
+      if (previewSound) {
+        try { await previewSound.unloadAsync(); } catch (e) {}
+        setPreviewSound(null);
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: 1.0 });
+      setPreviewSound(sound);
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (status.didJustFinish) { sound.unloadAsync().catch(() => {}); setPreviewSound(null); }
+      });
+    } catch (e) {
+      showNeonAlert({ title: 'PREVIEW FAILED', message: 'Could not play this tone.', icon: 'alert-circle-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+    }
+  };
+
+  const handleClearTone = async (kind: 'call' | 'message' | 'group') => {
+    await setCustomTone(kind, null);
+  };
+
   const handleContactSupport = async () => {
     const url = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('NOVA Support Request')}`;
     try {
@@ -277,33 +344,43 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          {/* Cyber Call Ringtone */}
+          {/* Custom Tones — pick any audio from device */}
           <View style={styles.settingRowCol}>
-            <Text style={styles.settingTitleCol}>Secure Holographic Ringtone</Text>
-            <View style={styles.ringtoneList}>
-              {['Neon Horizon', 'Interstellar Pulsar', 'Quantum Cyber-synth'].map((rt) => (
-                <TouchableOpacity
-                  key={rt}
-                  style={[
-                    styles.ringtoneCard,
-                    selectedRingtone === rt && styles.ringtoneCardActive
-                  ]}
-                  onPress={() => setSelectedRingtone(rt)}
-                >
-                  <Ionicons
-                    name={selectedRingtone === rt ? 'musical-notes' : 'musical-note-outline'}
-                    size={16}
-                    color={selectedRingtone === rt ? '#090d16' : '#94a3b8'}
-                  />
-                  <Text style={[
-                    styles.ringtoneText,
-                    selectedRingtone === rt && { color: '#090d16', fontWeight: '700' }
-                  ]}>
-                    {rt}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={styles.settingTitleCol}>Notification & Call Tones</Text>
+            {(['call', 'message', 'group'] as const).map((kind) => {
+              const tone = customTones[kind];
+              return (
+                <View key={kind} style={styles.toneRow}>
+                  <View style={styles.toneIconWrap}>
+                    <Ionicons
+                      name={kind === 'call' ? 'call-outline' : kind === 'group' ? 'people-outline' : 'chatbubble-outline'}
+                      size={18}
+                      color="#0df"
+                    />
+                  </View>
+                  <View style={styles.toneInfo}>
+                    <Text style={styles.toneTitle}>{toneLabels[kind]}</Text>
+                    <Text style={styles.toneSub} numberOfLines={1}>{tone ? tone.name : 'Default'}</Text>
+                  </View>
+                  {tone && (
+                    <TouchableOpacity style={styles.toneIconBtn} onPress={() => handlePreviewTone(tone.uri)}>
+                      <Ionicons name="play" size={15} color="#10b981" />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.toneIconBtn} onPress={() => handlePickTone(kind)} disabled={busyTone === kind}>
+                    {busyTone === kind
+                      ? <ActivityIndicator size="small" color="#0df" />
+                      : <Ionicons name="folder-open-outline" size={15} color="#0df" />}
+                  </TouchableOpacity>
+                  {tone && (
+                    <TouchableOpacity style={styles.toneIconBtn} onPress={() => handleClearTone(kind)}>
+                      <Ionicons name="close" size={15} color="#ef4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
+            <Text style={styles.toneHint}>Tap the folder icon to pick any audio from your device. Leave as Default to use the standard tone.</Text>
           </View>
 
           {/* Privacy Toggles */}
@@ -648,6 +725,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 6,
+  },
+  toneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  toneIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 221, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  toneInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  toneTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  toneSub: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  toneIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  toneHint: {
+    color: '#475569',
+    fontSize: 11,
+    marginTop: 12,
+    lineHeight: 16,
   },
   toggleSwitch: {
     width: 44,

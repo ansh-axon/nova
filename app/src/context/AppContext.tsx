@@ -6,6 +6,9 @@ import { showNeonAlert } from '../components/NeonAlert';
 import { getIceServers, getIceServersSync } from '../utils/iceConfig';
 import { getToken, setToken as secureSetToken, deleteToken } from '../utils/tokenStore';
 
+// A reference to a user-picked tone file stored in the app's documents dir.
+export interface ToneRef { uri: string; name: string }
+
 export interface User {
   id: string;
   username: string;
@@ -34,6 +37,8 @@ export interface Conversation {
   participants: User[];
   lastMessage?: Message;
   updatedAt: string;
+  isGroup?: boolean;
+  groupName?: string | null;
 }
 
 export interface StatusStory {
@@ -110,6 +115,10 @@ interface AppContextType {
   endCallLog: (callId: string, duration?: number) => Promise<void>;
   chatWallpaper: string | null;
   selectedRingtone: string;
+  // User-selected custom tones (picked from device). null = use default.
+  customTones: { call: ToneRef | null; message: ToneRef | null; group: ToneRef | null };
+  setCustomTone: (kind: 'call' | 'message' | 'group', tone: ToneRef | null) => Promise<void>;
+  playMessageTone: (isGroup: boolean) => void;
   privacyLastSeen: boolean;
   privacyReadReceipts: boolean;
   setChatWallpaper: (val: string | null) => Promise<void>;
@@ -209,6 +218,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [chatWallpaper, setChatWallpaperState] = useState<string | null>(null);
   const [selectedRingtone, setSelectedRingtoneState] = useState<string>('Neon Horizon');
+  const [customTones, setCustomTonesState] = useState<{ call: ToneRef | null; message: ToneRef | null; group: ToneRef | null }>({ call: null, message: null, group: null });
+  // A dedicated sound ref for short message/notification tones (separate from the
+  // looping call ringtone so they never interfere with each other).
+  const messageToneSoundRef = useRef<any>(null);
+  // Refs mirror latest values so the (once-bound) socket handlers never read stale state.
+  const customTonesRef = useRef(customTones);
+  useEffect(() => { customTonesRef.current = customTones; }, [customTones]);
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   const [privacyLastSeen, setPrivacyLastSeenState] = useState<boolean>(true);
   const [privacyReadReceipts, setPrivacyReadReceiptsState] = useState<boolean>(true);
 
@@ -334,10 +352,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const candidates = type === 'dialing' ? dialingUrls : ringtoneUrls;
-      console.log(`[SoundEngine] Attempting to play ${type} tone, ${candidates.length} source(s)`);
+      // A user-picked custom ringtone takes priority for incoming calls.
+      const finalCandidates = (type === 'ringing' && customTones.call?.uri)
+        ? [customTones.call.uri, ...candidates]
+        : candidates;
+      console.log(`[SoundEngine] Attempting to play ${type} tone, ${finalCandidates.length} source(s)`);
 
       let loaded = false;
-      for (const url of candidates) {
+      for (const url of finalCandidates) {
         try {
           const { sound } = await Audio.Sound.createAsync(
             { uri: url },
@@ -357,7 +379,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Failed to play call sound:', err);
     }
-  }, [selectedRingtone]);
+  }, [selectedRingtone, customTones]);
+
+  // Plays a short, non-looping message/group notification tone if the user has
+  // picked one. Safe to call rapidly — it replaces any currently-playing tone.
+  const playMessageTone = useCallback(async (isGroup: boolean) => {
+    const tones = customTonesRef.current;
+    const tone = isGroup ? tones.group : tones.message;
+    if (!tone?.uri) return; // no custom tone set → stay silent (OS notif handles default)
+    try {
+      const { Audio } = require('expo-av');
+      if (messageToneSoundRef.current) {
+        try { await messageToneSoundRef.current.unloadAsync(); } catch (e) {}
+        messageToneSoundRef.current = null;
+      }
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: tone.uri },
+        { shouldPlay: true, isLooping: false, volume: 1.0 }
+      );
+      messageToneSoundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (status.didJustFinish) {
+          sound.unloadAsync().catch(() => {});
+          if (messageToneSoundRef.current === sound) messageToneSoundRef.current = null;
+        }
+      });
+    } catch (err) {
+      console.warn('[SoundEngine] message tone failed:', err);
+    }
+  }, []);
 
   const stopCallSound = useCallback(async () => {
     Vibration.cancel();
@@ -860,6 +910,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setSelectedRingtoneState(storedRingtone);
         }
 
+        // Restore any user-picked custom tones (call / message / group)
+        try {
+          const [callT, msgT, grpT] = await Promise.all([
+            AsyncStorage.getItem('customTone_call'),
+            AsyncStorage.getItem('customTone_message'),
+            AsyncStorage.getItem('customTone_group'),
+          ]);
+          setCustomTonesState({
+            call: callT ? JSON.parse(callT) : null,
+            message: msgT ? JSON.parse(msgT) : null,
+            group: grpT ? JSON.parse(grpT) : null,
+          });
+        } catch (e) {
+          console.warn('Failed to load custom tones:', e);
+        }
+
         const storedLastSeen = await AsyncStorage.getItem('privacyLastSeen');
         if (storedLastSeen) {
           setPrivacyLastSeenState(storedLastSeen === 'true');
@@ -949,6 +1015,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     socketInstance.on('message_received', (newMessage: Message) => {
       console.log('New message received via Socket:', newMessage);
       const convId = newMessage.conversation;
+
+      // Play the user's chosen message/group tone for incoming messages
+      // (server only emits this event to recipients, never the sender).
+      try {
+        const conv = conversationsRef.current.find((c) => c._id === convId);
+        playMessageTone(!!(conv && conv.isGroup));
+      } catch (e) { /* non-fatal */ }
 
       // 1. Append message to the conversation's message history if loaded
       setMessages((prev) => {
@@ -1980,6 +2053,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await AsyncStorage.setItem('selectedRingtone', val);
   };
 
+  // Persist & apply a user-picked custom tone (or clear it with null).
+  const setCustomTone = async (kind: 'call' | 'message' | 'group', tone: ToneRef | null) => {
+    setCustomTonesState((prev) => ({ ...prev, [kind]: tone }));
+    try {
+      if (tone) {
+        await AsyncStorage.setItem(`customTone_${kind}`, JSON.stringify(tone));
+      } else {
+        await AsyncStorage.removeItem(`customTone_${kind}`);
+      }
+    } catch (e) {
+      console.warn('Failed to persist custom tone:', e);
+    }
+  };
+
   const setPrivacyLastSeen = async (val: boolean) => {
     setPrivacyLastSeenState(val);
     await AsyncStorage.setItem('privacyLastSeen', val ? 'true' : 'false');
@@ -2030,6 +2117,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         endCallLog,
         chatWallpaper,
         selectedRingtone,
+        customTones,
+        setCustomTone,
+        playMessageTone,
         privacyLastSeen,
         privacyReadReceipts,
         setChatWallpaper,
