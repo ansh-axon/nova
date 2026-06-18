@@ -21,3 +21,5 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false   # Google Gemini API key for the in-app NOVA AI assistant

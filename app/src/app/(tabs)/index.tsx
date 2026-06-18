@@ -54,7 +54,7 @@ export default function BentoDashboardScreen() {
       message: 'Choose a secure command to execute:',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
-        { text: '🤖 Sync Meta AI', onPress: handleStartMetaAI },
+        { text: '🤖 Ask NOVA AI', onPress: handleStartMetaAI },
         { text: '🔒 Security Vault Locker', onPress: () => {
             setIsVaultUnlocked(false);
             setPinInput('');
@@ -127,7 +127,7 @@ export default function BentoDashboardScreen() {
       } else {
         showNeonAlert({
           title: 'AI SYNC',
-          message: 'Meta AI is starting up. Please try again.',
+          message: 'NOVA AI is starting up. Please try again.',
           icon: 'information-circle-outline',
           iconColor: '#f59e0b',
           borderColor: '#f59e0b',
@@ -247,34 +247,38 @@ export default function BentoDashboardScreen() {
           </View>
           <View style={styles.bentoSecureInfo}>
             <Text style={styles.bentoSecureTitle}>ENCRYPTION ACTIVE</Text>
-            <Text style={styles.bentoSecureSubtitle}>End-to-end secure for 15-member private groups.</Text>
+            <Text style={styles.bentoSecureSubtitle}>End-to-end secure · private by design</Text>
+          </View>
+          <View style={styles.memberCountPill}>
+            <Ionicons name="people" size={14} color="#0df" />
+            <Text style={styles.memberCountNum}>{users.filter(u => u.username !== 'meta_ai').length + 1}/15</Text>
+            <Text style={styles.memberCountLbl}>users</Text>
           </View>
         </View>
 
         {/* Bento Items 2: Featured Dials Bento Grid */}
         <View style={styles.bentoGrid}>
-          {/* Left Column: Family Vault Group chat card */}
+          {/* Left Column: Document Locker quick-access card (opens real on-device locker) */}
           <TouchableOpacity 
             style={styles.bentoBigCard}
-            onPress={() => showNeonAlert({
-              title: 'E2EE VAULT',
-              message: 'Opening E2EE Family Vault room...',
-              icon: 'lock-closed-outline',
-              iconColor: '#10b981',
-              borderColor: '#10b981',
-            })}
+            onPress={() => {
+              setIsVaultUnlocked(false);
+              setPinInput('');
+              setVaultErrorMessage(null);
+              setShowVaultModal(true);
+            }}
           >
             <View style={styles.bentoBigCardHeader}>
               <View style={styles.vaultBadgeBg}>
-                <Text style={styles.vaultBadgeText}>F</Text>
+                <Ionicons name="lock-closed" size={20} color="#10b981" />
               </View>
               <View style={styles.membersCountBadge}>
-                <Text style={styles.membersCountText}>12/15</Text>
+                <Text style={styles.membersCountText}>SECURE</Text>
               </View>
             </View>
             <View style={styles.bentoBigCardFooter}>
-              <Text style={styles.bentoBigCardTitle}>Family Vault</Text>
-              <Text style={styles.bentoBigCardSubtitle} numberOfLines={1}>Zoya: Check doc.</Text>
+              <Text style={styles.bentoBigCardTitle}>Document Locker</Text>
+              <Text style={styles.bentoBigCardSubtitle} numberOfLines={1}>Private · encrypted files</Text>
             </View>
           </TouchableOpacity>
 
@@ -769,6 +773,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
     fontWeight: '500',
+  },
+  memberCountPill: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 221, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 221, 255, 0.3)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 10,
+  },
+  memberCountNum: {
+    color: '#0df',
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  memberCountLbl: {
+    color: '#67e8f9',
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   bentoGrid: {
     flexDirection: 'row',

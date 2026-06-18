@@ -10,7 +10,7 @@ import { showNeonAlert } from '../../components/NeonAlert';
 const { width, height } = Dimensions.get('window');
 
 export default function StatusScreen() {
-  const { user, statuses, fetchStatuses, uploadStatus, uploadFile, serverUrl, markStatusViewed } = useApp();
+  const { user, statuses, fetchStatuses, uploadStatus, uploadFile, serverUrl, markStatusViewed, deleteStatus } = useApp();
   const isFocused = useIsFocused();
 
   const [selectedGroup, setSelectedGroup] = useState<any | null>(null);
@@ -18,6 +18,7 @@ export default function StatusScreen() {
   const [progress, setProgress] = useState(0);
   const [groupedStatuses, setGroupedStatuses] = useState<any[]>([]);
   const [showViewers, setShowViewers] = useState(false);
+  const [videoBuffering, setVideoBuffering] = useState(false);
 
   // Text status creator states
   const [showTextModal, setShowTextModal] = useState(false);
@@ -129,23 +130,26 @@ export default function StatusScreen() {
   // Story Auto-Progress Timer Animation (images/text only — videos are driven by
   // their own playback so they are NOT cut off at 5 seconds).
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    const cur = selectedGroup?.stories?.[currentStoryIndex];
+    if (!selectedGroup) return;
+    const cur = selectedGroup.stories?.[currentStoryIndex];
     const isVideoStory = cur?.statusType === 'video';
-    if (selectedGroup && !isVideoStory) {
-      interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 1) {
-            handleNextStory();
-            return 0;
-          }
-          return prev + 0.02; // ~5 seconds for image/text stories
-        });
-      }, 100);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
+    // Videos drive their own progress via onPlaybackStatusUpdate.
+    if (isVideoStory) return;
+
+    // Timestamp-based progress: reliable and resets cleanly for every story,
+    // so the second (and later) stories fill their bar fully like the first.
+    setProgress(0);
+    const STORY_MS = 5000; // image/text shown for ~5 seconds
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      const p = Math.min(1, (Date.now() - startedAt) / STORY_MS);
+      setProgress(p);
+      if (p >= 1) {
+        clearInterval(interval);
+        handleNextStory();
+      }
+    }, 50);
+    return () => clearInterval(interval);
   }, [selectedGroup, currentStoryIndex]);
 
   // Mark viewed when a new story loads
@@ -178,6 +182,38 @@ export default function StatusScreen() {
     } else {
       setSelectedGroup(null); // Auto close if tapped left on first
     }
+  };
+
+  // Delete the currently-viewed status (own status only).
+  const handleDeleteCurrentStatus = () => {
+    if (!selectedGroup) return;
+    const story = selectedGroup.stories[currentStoryIndex];
+    if (!story) return;
+    showNeonAlert({
+      title: 'DELETE STATUS',
+      message: 'Remove this status update? This cannot be undone.',
+      icon: 'trash-outline',
+      borderColor: '#f43f5e',
+      iconColor: '#f43f5e',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            const ok = await deleteStatus(story._id);
+            if (ok) {
+              const remaining = selectedGroup.stories.filter((s: any) => s._id !== story._id);
+              if (remaining.length === 0) {
+                setSelectedGroup(null);
+              } else {
+                setSelectedGroup({ ...selectedGroup, stories: remaining });
+                setCurrentStoryIndex(Math.min(currentStoryIndex, remaining.length - 1));
+                setProgress(0);
+              }
+            }
+          }
+        },
+      ],
+    });
   };
 
   const handleCreateStatus = () => {
@@ -225,7 +261,7 @@ export default function StatusScreen() {
           await uploadStatus({
             statusType: 'image',
             mediaUrl: uploadResult.url,
-            textContent: 'Neural uplink loaded 🌐'
+            textContent: ''
           });
         }
       } catch (err: any) {
@@ -273,7 +309,7 @@ export default function StatusScreen() {
           await uploadStatus({
             statusType: 'video',
             mediaUrl: uploadResult.url,
-            textContent: 'Transmission uplink online 📹'
+            textContent: ''
           });
         }
       } catch (err: any) {
@@ -549,6 +585,11 @@ export default function StatusScreen() {
                   {formatTimeAgo(currentStory.createdAt)}
                 </Text>
               </View>
+              {selectedGroup.userId === user?.id && (
+                <TouchableOpacity style={styles.viewerDelete} onPress={handleDeleteCurrentStatus}>
+                  <Ionicons name="trash-outline" size={22} color="#f43f5e" />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.viewerClose} onPress={() => setSelectedGroup(null)}>
                 <Ionicons name="close-outline" size={28} color="#fff" />
               </TouchableOpacity>
@@ -584,10 +625,12 @@ export default function StatusScreen() {
                       resizeMode={ResizeMode.CONTAIN}
                       shouldPlay={selectedGroup !== null}
                       isLooping={false}
-                      useNativeControls
+                      progressUpdateIntervalMillis={250}
                       style={styles.viewerVideo}
+                      onLoadStart={() => setVideoBuffering(true)}
                       onPlaybackStatusUpdate={(status: any) => {
                         if (status.isLoaded) {
+                          setVideoBuffering(!!status.isBuffering && !status.isPlaying);
                           if (status.durationMillis) {
                             setProgress(Math.min(1, status.positionMillis / status.durationMillis));
                           }
@@ -597,6 +640,12 @@ export default function StatusScreen() {
                         }
                       }}
                     />
+                    {videoBuffering && (
+                      <View style={styles.videoLoadingOverlay} pointerEvents="none">
+                        <ActivityIndicator size="large" color="#0df" />
+                        <Text style={styles.videoLoadingText}>Loading…</Text>
+                      </View>
+                    )}
                     {currentStory.textContent && (
                       <View style={styles.imageTextCaptionBg}>
                         <Text style={styles.imageTextCaption}>{currentStory.textContent}</Text>
@@ -956,6 +1005,10 @@ const styles = StyleSheet.create({
   viewerClose: {
     padding: 4,
   },
+  viewerDelete: {
+    padding: 6,
+    marginRight: 4,
+  },
   viewerBody: {
     flex: 1,
     justifyContent: 'center',
@@ -964,17 +1017,30 @@ const styles = StyleSheet.create({
   },
   imageViewerWrapper: {
     width: width,
-    height: height * 0.7,
+    height: height * 0.78,
     justifyContent: 'center',
     alignItems: 'center',
   },
   viewerImage: {
     width: width,
-    height: height * 0.6,
+    height: height * 0.7,
   },
   viewerVideo: {
     width: width,
-    height: height * 0.6,
+    height: height * 0.78,
+  },
+  videoLoadingOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoLoadingText: {
+    color: '#67e8f9',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 10,
+    letterSpacing: 1,
   },
   imageTextCaptionBg: {
     position: 'absolute',

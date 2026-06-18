@@ -1,5 +1,16 @@
 import tweetnacl from 'tweetnacl';
 import { decodeUTF8, encodeUTF8 } from 'tweetnacl-util';
+import * as Crypto from 'expo-crypto';
+
+// React Native lacks a built-in window.crypto.getRandomValues. Wire tweetnacl's
+// PRNG to expo-crypto so randomBytes() works for E2E key/nonce generation.
+if (!(tweetnacl as any).__novaPrngSet) {
+  tweetnacl.setPRNG((x: Uint8Array, n: number) => {
+    const random = Crypto.getRandomBytes(n);
+    for (let i = 0; i < n; i++) x[i] = random[i];
+  });
+  (tweetnacl as any).__novaPrngSet = true;
+}
 
 /**
  * Client-side encryption utility for Nova Chat

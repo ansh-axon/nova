@@ -1,7 +1,19 @@
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
-import util from 'tweetnacl-util';
+import { decodeUTF8, encodeBase64 } from 'tweetnacl-util';
+
+// React Native does not provide window.crypto.getRandomValues by default, so
+// tweetnacl's randomBytes throws "no PRNG". Wire it up to expo-crypto, which
+// is backed by the platform's secure RNG. Guard so we only set it once.
+if (!(nacl as any).__novaPrngSet) {
+  nacl.setPRNG((x: Uint8Array, n: number) => {
+    const random = Crypto.getRandomBytes(n);
+    for (let i = 0; i < n; i++) x[i] = random[i];
+  });
+  (nacl as any).__novaPrngSet = true;
+}
 
 // On-device document locker. Files are copied into the app's PRIVATE sandbox
 // directory (not visible to other apps / gallery) and metadata + a hashed PIN
@@ -31,7 +43,7 @@ async function ensureDir() {
 }
 
 function hashPin(pin: string, salt: string): string {
-  return util.encodeBase64(nacl.hash(util.decodeUTF8(`${salt}:${pin}`)));
+  return encodeBase64(nacl.hash(decodeUTF8(`${salt}:${pin}`)));
 }
 
 export async function hasPin(): Promise<boolean> {
@@ -40,7 +52,7 @@ export async function hasPin(): Promise<boolean> {
 }
 
 export async function setPin(pin: string): Promise<void> {
-  const salt = util.encodeBase64(nacl.randomBytes(16));
+  const salt = encodeBase64(nacl.randomBytes(16));
   const record: PinRecord = { salt, hash: hashPin(pin, salt) };
   await AsyncStorage.setItem(PIN_KEY, JSON.stringify(record));
 }

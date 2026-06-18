@@ -4,6 +4,7 @@ import { AppProvider, useApp } from '../context/AppContext';
 import { ActivityIndicator, View, Modal, Text, TouchableOpacity, Image, StyleSheet, Dimensions, Animated, Easing } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as SplashScreen from 'expo-splash-screen';
 import NeonAlert, { NeonAlertConfig, registerNeonAlert } from '../components/NeonAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
@@ -11,6 +12,14 @@ import { RTCView } from 'react-native-webrtc';
 import GroupCallHost from '../components/GroupCallHost';
 
 const { width } = Dimensions.get('window');
+
+// Hold the native splash screen on-screen until the JS app tree is ready.
+// Without this, splash auto-hides when the bundle loads, but React still has
+// to mount AppProvider / restore auth from AsyncStorage — which causes a
+// brief white flash. Keeping splash visible covers that gap.
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // ignore — already prevented or no splash
+});
 
 function NeonAlertHost() {
   const [visible, setVisible] = useState(false);
@@ -379,13 +388,22 @@ function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
 
+  // Hide the native splash screen as soon as auth state is resolved.
+  // This removes the 2-second white flash between splash and first render.
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [loading]);
+
   useEffect(() => {
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!token && !inAuthGroup) {
-      router.replace('/(auth)/login');
+      // New users land on the animated Sign Up screen first; login is one tap away.
+      router.replace('/(auth)/register');
     } else if (token && inAuthGroup) {
       router.replace('/(tabs)');
     }

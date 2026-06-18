@@ -5,6 +5,7 @@ const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const EncryptionManager = require('../utils/encryption');
+const { generateAIReply, AI_USERNAME } = require('../utils/aiAssistant');
 
 // @route   GET api/messages/:conversationId
 // @desc    Get all messages for a conversation (with decryption)
@@ -123,6 +124,61 @@ router.post('/', auth, async (req, res) => {
     });
 
     res.json(populatedMessage);
+
+    // ── NOVA AI auto-reply ──────────────────────────────────────────────
+    // If this is a 1-on-1 chat with the AI bot, generate a reply in the
+    // background (after responding) and push it back over the socket.
+    if (!conversation.isGroup) {
+      const otherId = conversation.participants.find((p) => p.toString() !== req.user.id);
+      (async () => {
+        try {
+          const aiUser = await User.findById(otherId).select('+secretKey');
+          if (!aiUser || aiUser.username !== AI_USERNAME) return;
+
+          const aiUserId = aiUser._id.toString();
+
+          // Show a typing indicator from the AI while it "thinks"
+          req.io.to(`user_${req.user.id}`).emit('typing_status', {
+            conversationId, senderId: aiUserId, isTyping: true,
+          });
+
+          const aiText = await generateAIReply(conversationId, aiUserId, sender.displayName || sender.username);
+
+          // Encrypt the AI reply for the user (1-on-1 asymmetric)
+          let aiEncrypted = null;
+          if (aiUser.secretKey && sender.publicKey) {
+            aiEncrypted = EncryptionManager.encryptMessage(aiText, aiUser.secretKey, sender.publicKey);
+          }
+
+          const aiMessage = new Message({
+            conversation: conversationId,
+            sender: aiUser._id,
+            text: aiText,
+            messageType: 'text',
+            encryptedContent: aiEncrypted,
+            readBy: [{ user: aiUser._id, readAt: new Date() }],
+          });
+          await aiMessage.save();
+
+          conversation.lastMessage = aiMessage._id;
+          await conversation.save();
+
+          const populatedAI = await Message.findById(aiMessage._id)
+            .populate('sender', 'username displayName avatarUrl');
+
+          // Stop typing, then deliver the AI message
+          req.io.to(`user_${req.user.id}`).emit('typing_status', {
+            conversationId, senderId: aiUserId, isTyping: false,
+          });
+          req.io.to(`user_${req.user.id}`).emit('message_received', populatedAI);
+        } catch (e) {
+          console.error('[NOVA AI] auto-reply failed:', e.message);
+          req.io.to(`user_${req.user.id}`).emit('typing_status', {
+            conversationId, senderId: otherId.toString(), isTyping: false,
+          });
+        }
+      })();
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error sending message' });

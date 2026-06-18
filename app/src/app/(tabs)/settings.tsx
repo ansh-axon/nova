@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { showNeonAlert } from '../../components/NeonAlert';
 import { useApp } from '../../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -159,6 +159,34 @@ export default function SettingsScreen() {
     });
   };
 
+  const SUPPORT_EMAIL = 'nova.verifying@gmail.com';
+
+  const handleContactSupport = async () => {
+    const url = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('NOVA Support Request')}`;
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (ok) {
+        await Linking.openURL(url);
+      } else {
+        showNeonAlert({
+          title: 'CONTACT SUPPORT',
+          message: `Reach us at ${SUPPORT_EMAIL}`,
+          icon: 'mail-outline',
+          iconColor: '#0df',
+          borderColor: '#0df',
+        });
+      }
+    } catch {
+      showNeonAlert({
+        title: 'CONTACT SUPPORT',
+        message: `Reach us at ${SUPPORT_EMAIL}`,
+        icon: 'mail-outline',
+        iconColor: '#0df',
+        borderColor: '#0df',
+      });
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
       {/* Profile Picture Header Section */}
@@ -306,11 +334,40 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Help & Support Section */}
+        <View style={styles.helpSection}>
+          <Text style={styles.sectionHeaderTitle}>Help & Support</Text>
+
+          <TouchableOpacity style={styles.helpRow} onPress={handleContactSupport} activeOpacity={0.7}>
+            <View style={styles.helpIconBg}>
+              <Ionicons name="mail-outline" size={18} color="#0df" />
+            </View>
+            <View style={styles.helpInfo}>
+              <Text style={styles.helpTitle}>Contact Support</Text>
+              <Text style={styles.helpSubtitle}>{SUPPORT_EMAIL}</Text>
+            </View>
+            <Ionicons name="open-outline" size={18} color="#475569" />
+          </TouchableOpacity>
+
+          <View style={styles.helpRow}>
+            <View style={styles.helpIconBg}>
+              <Ionicons name="information-circle-outline" size={18} color="#0df" />
+            </View>
+            <View style={styles.helpInfo}>
+              <Text style={styles.helpTitle}>App Version</Text>
+              <Text style={styles.helpSubtitle}>NOVA v1.0.0</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Log Out Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" style={{ marginRight: 8 }} />
           <Text style={styles.logoutButtonText}>Log Out Account</Text>
         </TouchableOpacity>
+
+        {/* Created by footer */}
+        <Text style={styles.creditText}>Created by Ansh Verma</Text>
       </View>
     </ScrollView>
   );
@@ -455,6 +512,49 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 15,
     fontWeight: '700',
+  },
+  helpSection: {
+    marginTop: 28,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    paddingTop: 24,
+  },
+  helpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.02)',
+  },
+  helpIconBg: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 221, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  helpInfo: {
+    flex: 1,
+  },
+  helpTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  helpSubtitle: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  creditText: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 24,
+    letterSpacing: 0.5,
   },
   personalizationSection: {
     marginTop: 28,

@@ -325,7 +325,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Seed Meta AI Bot on Database connection
+// Seed / update the NOVA AI assistant bot on startup
 const seedMetaAI = async () => {
   try {
     let metaAI = await User.findOne({ username: 'meta_ai' });
@@ -337,17 +337,23 @@ const seedMetaAI = async () => {
       metaAI = new User({
         username: 'meta_ai',
         password: hashedPassword,
-        displayName: 'Meta AI 🤖',
-        about: 'Nova AI Assistant. Ask me anything!',
+        displayName: 'NOVA AI 🤖',
+        about: 'Your smart AI assistant. Ask me anything!',
         avatarUrl: '',
         publicKey: encryptionKeys.publicKey,
         secretKey: encryptionKeys.secretKey
       });
       await metaAI.save();
-      console.log('--- Seeded Meta AI Bot User successfully ---');
+      console.log('--- Seeded NOVA AI Bot User successfully ---');
+    } else if (metaAI.displayName !== 'NOVA AI 🤖') {
+      // Rebrand any previously-seeded "Meta AI" bot to NOVA AI
+      metaAI.displayName = 'NOVA AI 🤖';
+      metaAI.about = 'Your smart AI assistant. Ask me anything!';
+      await metaAI.save();
+      console.log('--- Rebranded AI bot to NOVA AI ---');
     }
   } catch (err) {
-    console.error('Failed to seed Meta AI Bot:', err);
+    console.error('Failed to seed NOVA AI Bot:', err);
   }
 };
 

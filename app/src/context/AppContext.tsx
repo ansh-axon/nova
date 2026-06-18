@@ -103,6 +103,7 @@ interface AppContextType {
   }) => Promise<boolean>;
   uploadFile: (fileUri: string, fileMimeType: string) => Promise<{ url: string } | null>;
   markStatusViewed: (statusId: string) => Promise<void>;
+  deleteStatus: (statusId: string) => Promise<boolean>;
   fetchCallHistory: () => Promise<void>;
   initiateCallLog: (recipientId: string, callType: 'voice' | 'video', conversationId?: string) => Promise<any | null>;
   endCallLog: (callId: string, duration?: number) => Promise<void>;
@@ -142,7 +143,11 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs = 6000) => {
+// Default timeout is generous (60s) because the free-tier server can "cold start"
+// (wake from sleep) which takes ~30-50s on the first request after inactivity.
+// Used only by auth calls, so a longer wait here is acceptable and avoids
+// spurious "Connection Timeout" errors on the first login/register of the day.
+const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1348,18 +1353,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, password, deviceId })
-      }, 8000);
+      }, 25000);
 
       const data = await response.json();
       if (!response.ok) {
-        showNeonAlert({ title: 'SIGN UP FAILED', message: data.message || 'Check server connection.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        showNeonAlert({ title: 'SIGN UP FAILED', message: data.message || 'Please try again in a moment.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
         return { success: false, needsVerification: data.needsVerification, email: data.email };
       }
       // Account created; user must now verify the emailed OTP.
       return { success: true, needsVerification: true, email: data.email };
     } catch (err: any) {
       console.error(err);
-      showNeonAlert({ title: 'CONNECTION ERROR', message: err.message === 'Connection Timeout' ? `Server connection timed out at ${activeUrl}. Verify your server IP and that it is running.` : `Failed to connect to backend server at ${activeUrl}.`, icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      showNeonAlert({
+        title: 'SERVER WAKING UP',
+        message: 'Our server is starting up after a period of inactivity. Please tap Sign Up again — it usually connects within 2-3 attempts.',
+        icon: 'cloud-offline-outline',
+        borderColor: '#f59e0b',
+        iconColor: '#f59e0b'
+      });
       return { success: false };
     }
   };
@@ -1475,7 +1486,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
-      }, 8000);
+      }, 25000);
 
       const data = await response.json();
       if (!response.ok) {
@@ -1490,7 +1501,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return true;
     } catch (err: any) {
       console.error(err);
-      showNeonAlert({ title: 'CONNECTION ERROR', message: err.message === 'Connection Timeout' ? `Server connection timed out at ${activeUrl}. Please verify your server IP address and make sure it is running.` : `Failed to connect to backend server at ${activeUrl}. Ensure the server is running.`, icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      showNeonAlert({
+        title: 'SERVER WAKING UP',
+        message: 'Our server is starting up after a period of inactivity. Please tap Login again — it usually connects within 2-3 attempts.',
+        icon: 'cloud-offline-outline',
+        borderColor: '#f59e0b',
+        iconColor: '#f59e0b'
+      });
       return false;
     }
   };
@@ -1869,6 +1886,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // REST API: Delete own status
+  const deleteStatus = async (statusId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const response = await fetch(`${serverUrl}/api/status/${statusId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        await fetchStatuses();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Delete status error:', err);
+      return false;
+    }
+  };
+
   // REST API: Fetch call history
   const fetchCallHistory = async () => {
     if (!token) return;
@@ -1985,6 +2021,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         uploadStatus,
         uploadFile,
         markStatusViewed,
+        deleteStatus,
         fetchCallHistory,
         initiateCallLog,
         endCallLog,
