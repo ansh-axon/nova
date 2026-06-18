@@ -18,9 +18,17 @@ function getTransporter() {
   const pass = process.env.EMAIL_PASS;
   if (!user || !pass) return null;
 
+  // Explicit Gmail SMTP over STARTTLS (port 587). More reliable on cloud hosts
+  // than the implicit 'service: gmail' (port 465), which some providers block.
+  // Bounded timeouts ensure a request never hangs if SMTP is unreachable.
   transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user, pass },
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // upgrade to TLS via STARTTLS
+    auth: { user, pass: (pass || '').replace(/\s+/g, '') }, // strip spaces from app password
+    connectionTimeout: 10000,
+    greetingTimeout: 8000,
+    socketTimeout: 15000,
   });
   return transporter;
 }

@@ -191,7 +191,7 @@ const GROUP_PC_CONFIG = {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [serverUrl, setServerUrlState] = useState<string>('https://analyze-border-magnetic-addresses.trycloudflare.com');
+  const [serverUrl, setServerUrlState] = useState<string>('https://nova-server-wg9p.onrender.com');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -826,8 +826,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loadSession = async () => {
       try {
         const storedUrl = await AsyncStorage.getItem('serverUrl');
-        const defaultUrl = 'https://analyze-border-magnetic-addresses.trycloudflare.com';
-        if (storedUrl) {
+        const defaultUrl = 'https://nova-server-wg9p.onrender.com';
+        // Migrate away from old/dead tunnel URLs so existing installs pick up the live server.
+        const isStale = storedUrl && (storedUrl.includes('trycloudflare.com') || storedUrl.includes('192.168.') || storedUrl.includes('localhost') || storedUrl.includes('10.0.2.2'));
+        if (storedUrl && !isStale) {
           setServerUrlState(storedUrl);
         } else {
           setServerUrlState(defaultUrl);

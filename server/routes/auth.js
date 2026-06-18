@@ -86,7 +86,8 @@ router.post('/register', async (req, res) => {
     });
 
     await user.save();
-    await sendCodeEmail(lowercaseEmail, code, 'verify');
+    // Send email in the background so the response returns instantly even if SMTP is slow.
+    sendCodeEmail(lowercaseEmail, code, 'verify').catch(e => console.error('[MAILER] verify send failed:', e.message));
 
     res.json({ message: 'Verification code sent to your email.', needsVerification: true, email: lowercaseEmail, username: lowercaseUsername });
   } catch (err) {
@@ -145,7 +146,7 @@ router.post('/resend-otp', async (req, res) => {
     user.otpCode = code;
     user.otpExpires = new Date(Date.now() + CODE_TTL_MS);
     await user.save();
-    await sendCodeEmail(user.email, code, 'verify');
+    sendCodeEmail(user.email, code, 'verify').catch(e => console.error('[MAILER] resend send failed:', e.message));
 
     res.json({ message: 'A new verification code has been sent to your email.' });
   } catch (err) {
@@ -203,7 +204,7 @@ router.post('/forgot-password', async (req, res) => {
       user.resetCode = code;
       user.resetExpires = new Date(Date.now() + CODE_TTL_MS);
       await user.save();
-      await sendCodeEmail(user.email, code, 'reset');
+      sendCodeEmail(user.email, code, 'reset').catch(e => console.error('[MAILER] reset send failed:', e.message));
     }
     res.json({ message: 'If an account exists for that email, a reset code has been sent.' });
   } catch (err) {
