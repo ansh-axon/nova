@@ -8,6 +8,7 @@ import NeonAlert, { NeonAlertConfig, registerNeonAlert } from '../components/Neo
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
+import GroupCallHost from '../components/GroupCallHost';
 
 const { width } = Dimensions.get('window');
 
@@ -102,18 +103,27 @@ function GlobalCallHost() {
     }
   }, [localStream]);
 
-  // Call duration timer
+  // Call duration timer.
+  // Derive elapsed time from the server-provided `startedAt` timestamp (set when the
+  // call is accepted) so BOTH devices show the same duration. Previously each device
+  // counted locally from the moment it switched to 'connected', which happened at
+  // different times on caller vs receiver and caused the durations to drift apart.
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (callState === 'connected') {
-      interval = setInterval(() => {
-        setCallDuration(callDuration + 1);
-      }, 1000);
+      const startedAtRaw = activeCall?.startedAt;
+      const startTime = startedAtRaw ? new Date(startedAtRaw).getTime() : Date.now();
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setCallDuration(elapsed > 0 ? elapsed : 0);
+      };
+      tick(); // set immediately so UI doesn't show 00:00 for a second
+      interval = setInterval(tick, 1000);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [callState, callDuration]);
+  }, [callState, activeCall]);
 
   // Bind local mic muting to WebRTC track configurations
   useEffect(() => {
@@ -410,6 +420,7 @@ export default function RootLayout() {
         <RootLayoutNav />
         <NeonAlertHost />
         <GlobalCallHost />
+        <GroupCallHost />
       </AppProvider>
     </GestureHandlerRootView>
   );

@@ -17,6 +17,7 @@ export default function StatusScreen() {
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [groupedStatuses, setGroupedStatuses] = useState<any[]>([]);
+  const [showViewers, setShowViewers] = useState(false);
 
   // Text status creator states
   const [showTextModal, setShowTextModal] = useState(false);
@@ -125,17 +126,20 @@ export default function StatusScreen() {
     setGroupedStatuses(array);
   }, [statuses, user]);
 
-  // Story Auto-Progress Timer Animation
+  // Story Auto-Progress Timer Animation (images/text only — videos are driven by
+  // their own playback so they are NOT cut off at 5 seconds).
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (selectedGroup) {
+    const cur = selectedGroup?.stories?.[currentStoryIndex];
+    const isVideoStory = cur?.statusType === 'video';
+    if (selectedGroup && !isVideoStory) {
       interval = setInterval(() => {
         setProgress((prev) => {
           if (prev >= 1) {
             handleNextStory();
             return 0;
           }
-          return prev + 0.02; // Increments over 5 seconds (50 frames * 100ms)
+          return prev + 0.02; // ~5 seconds for image/text stories
         });
       }, 100);
     }
@@ -156,6 +160,7 @@ export default function StatusScreen() {
 
   const handleNextStory = () => {
     if (!selectedGroup) return;
+    setShowViewers(false);
     if (currentStoryIndex < selectedGroup.stories.length - 1) {
       setCurrentStoryIndex((prev) => prev + 1);
       setProgress(0);
@@ -166,6 +171,7 @@ export default function StatusScreen() {
 
   const handlePrevStory = () => {
     if (!selectedGroup) return;
+    setShowViewers(false);
     if (currentStoryIndex > 0) {
       setCurrentStoryIndex((prev) => prev - 1);
       setProgress(0);
@@ -181,7 +187,8 @@ export default function StatusScreen() {
       buttons: [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Write Text Update', onPress: () => setShowTextModal(true) },
-        { text: 'Upload Photo', onPress: handleUploadPhoto }
+        { text: 'Upload Photo', onPress: handleUploadPhoto },
+        { text: 'Upload Video', onPress: handleUploadVideo }
       ],
       icon: 'add-circle-outline',
       iconColor: '#0df',
@@ -579,6 +586,16 @@ export default function StatusScreen() {
                       isLooping={false}
                       useNativeControls
                       style={styles.viewerVideo}
+                      onPlaybackStatusUpdate={(status: any) => {
+                        if (status.isLoaded) {
+                          if (status.durationMillis) {
+                            setProgress(Math.min(1, status.positionMillis / status.durationMillis));
+                          }
+                          if (status.didJustFinish) {
+                            handleNextStory();
+                          }
+                        }
+                      }}
                     />
                     {currentStory.textContent && (
                       <View style={styles.imageTextCaptionBg}>
@@ -604,11 +621,48 @@ export default function StatusScreen() {
 
             {/* Own Story views count drawer */}
             {selectedGroup.userId === user?.id && (
-              <View style={styles.viewerBottomBar}>
+              <TouchableOpacity style={styles.viewerBottomBar} onPress={() => setShowViewers(true)} activeOpacity={0.8}>
                 <Ionicons name="eye-outline" size={20} color="#0df" style={{ marginRight: 8 }} />
                 <Text style={styles.viewersText}>
-                  {currentStory.viewers?.length || 0} viewed update
+                  {currentStory.viewers?.length || 0} viewed{(currentStory.viewers?.length || 0) > 0 ? ' • tap to see who' : ''}
                 </Text>
+                {(currentStory.viewers?.length || 0) > 0 && (
+                  <Ionicons name="chevron-up" size={18} color="#0df" style={{ marginLeft: 'auto' }} />
+                )}
+              </TouchableOpacity>
+            )}
+
+            {/* Seen-by list (who viewed this status) */}
+            {showViewers && selectedGroup.userId === user?.id && (
+              <View style={styles.seenSheet}>
+                <View style={styles.seenSheetHeader}>
+                  <Text style={styles.seenSheetTitle}>Viewed by {currentStory.viewers?.length || 0}</Text>
+                  <TouchableOpacity onPress={() => setShowViewers(false)}>
+                    <Ionicons name="close" size={24} color="#cbd5e1" />
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={currentStory.viewers || []}
+                  keyExtractor={(v: any, i: number) => (v.user?._id || v.user?.id || String(i))}
+                  ListEmptyComponent={<Text style={styles.seenEmpty}>No views yet.</Text>}
+                  renderItem={({ item }: { item: any }) => {
+                    const vu = item.user || {};
+                    const vname = vu.displayName || vu.username || 'User';
+                    return (
+                      <View style={styles.seenRow}>
+                        {vu.avatarUrl ? (
+                          <Image source={{ uri: vu.avatarUrl }} style={styles.seenAvatar} />
+                        ) : (
+                          <View style={[styles.seenAvatar, styles.seenAvatarFb]}>
+                            <Text style={styles.seenAvatarTxt}>{getInitials(vname)}</Text>
+                          </View>
+                        )}
+                        <Text style={styles.seenName}>{vname}</Text>
+                        {item.viewedAt && <Text style={styles.seenTime}>{formatTimeAgo(item.viewedAt)}</Text>}
+                      </View>
+                    );
+                  }}
+                />
               </View>
             )}
           </View>
@@ -977,5 +1031,70 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  seenSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: height * 0.5,
+    backgroundColor: '#0b1220',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderColor: 'rgba(0,221,255,0.2)',
+    zIndex: 30,
+  },
+  seenSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  seenSheetTitle: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  seenEmpty: {
+    color: '#64748b',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  seenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  seenAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 12,
+  },
+  seenAvatarFb: {
+    backgroundColor: '#1e293b',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  seenAvatarTxt: {
+    color: '#0df',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  seenName: {
+    flex: 1,
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  seenTime: {
+    color: '#64748b',
+    fontSize: 11,
   },
 });

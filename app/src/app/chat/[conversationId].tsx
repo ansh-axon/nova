@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, Camera } from 'expo-camera';
-import { Audio } from 'expo-av';
+import { Audio, Video, ResizeMode } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -189,7 +189,8 @@ export default function ChatScreen() {
     chatWallpaper, 
     setCallState, 
     setCallDuration, 
-    setActiveCall 
+    setActiveCall,
+    markConversationRead
   } = useApp();
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -200,9 +201,13 @@ export default function ChatScreen() {
   // Immersive viewer & dynamic audio memo states
   const [fullViewImageUri, setFullViewImageUri] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [fullViewVideoUri, setFullViewVideoUri] = useState<string | null>(null);
+  const [showVideoModal, setShowVideoModal] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  // Live clock tick (updates every second) for the 30-day auto-purge countdown banner
+  const [nowTick, setNowTick] = useState(Date.now());
 
 
 
@@ -235,6 +240,8 @@ export default function ChatScreen() {
       await loadMessages(conversationId);
       setLoading(false);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
+      // Mark the other person's messages as read (seen) once we open the chat
+      markConversationRead(conversationId);
     };
     fetchChatData();
   }, [conversationId]);
@@ -448,7 +455,7 @@ export default function ChatScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.8
     });
 
@@ -512,6 +519,10 @@ export default function ChatScreen() {
       console.log('Stopping audio recording...');
       setIsRecording(false);
       await recording.stopAndUnloadAsync();
+      // Reset audio mode out of "recording" so playback routes correctly afterwards
+      try {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      } catch (e) {}
       const uri = recording.getURI();
       setRecording(null);
 
@@ -604,6 +615,42 @@ export default function ChatScreen() {
 
   const chatMessages = messages[conversationId] || [];
 
+  // When new messages arrive while this chat is open, mark them seen immediately
+  useEffect(() => {
+    if (!conversationId || chatMessages.length === 0) return;
+    const last = chatMessages[chatMessages.length - 1];
+    const lastSenderId = typeof last.sender === 'string' ? last.sender : (last.sender as any)?._id || (last.sender as any)?.id;
+    if (lastSenderId && lastSenderId !== user?.id) {
+      markConversationRead(conversationId);
+    }
+  }, [chatMessages.length, conversationId]);
+
+  // Live ticking clock for the 30-day auto-purge countdown shown under the header.
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Each message auto-deletes 30 days after it was sent (server TTL index). The banner
+  // counts down to when the OLDEST message in this chat will purge. Returns null when
+  // there are no messages yet.
+  const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  const getPurgeCountdown = () => {
+    if (!chatMessages.length) return null;
+    const oldest = chatMessages.reduce((min, m) => {
+      const t = new Date(m.createdAt).getTime();
+      return t < min ? t : min;
+    }, Infinity);
+    if (!isFinite(oldest)) return null;
+    let remaining = oldest + RETENTION_MS - nowTick;
+    if (remaining < 0) remaining = 0;
+    const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+    const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+    const mins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+    const secs = Math.floor((remaining % (60 * 1000)) / 1000);
+    return `${days}d ${hours.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+  };
+
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -686,44 +733,57 @@ export default function ChatScreen() {
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
 
-    useEffect(() => {
-      return () => {
-        if (sound) {
-          sound.unloadAsync();
+    const onStatus = (status: any) => {
+      if (status.isLoaded) {
+        if (status.durationMillis) setDuration(status.durationMillis);
+        setPosition(status.positionMillis || 0);
+        setIsPlaying(status.isPlaying);
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+          setPosition(0);
         }
+      }
+    };
+
+    // Load the audio on mount so its duration shows BEFORE playing (like WhatsApp).
+    useEffect(() => {
+      let mounted = true;
+      let localSound: Audio.Sound | null = null;
+      (async () => {
+        try {
+          const { sound: s, status } = await Audio.Sound.createAsync(
+            { uri },
+            { shouldPlay: false, progressUpdateIntervalMillis: 250 },
+            onStatus
+          );
+          localSound = s;
+          if (!mounted) { await s.unloadAsync(); return; }
+          if (status.isLoaded && status.durationMillis) setDuration(status.durationMillis);
+          setSound(s);
+        } catch (err) {
+          console.log('Audio preload error:', err);
+        }
+      })();
+      return () => {
+        mounted = false;
+        if (localSound) localSound.unloadAsync();
       };
-    }, [sound]);
+    }, [uri]);
 
     const handlePlayPause = async () => {
       try {
-        if (sound) {
-          if (isPlaying) {
-            await sound.pauseAsync();
-            setIsPlaying(false);
-          } else {
-            await sound.playAsync();
-            setIsPlaying(true);
-          }
+        // Ensure audio routes to the speaker for playback (not stuck in record mode)
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        if (!sound) return;
+        if (isPlaying) {
+          await sound.pauseAsync();
+          setIsPlaying(false);
         } else {
-          console.log('Loading sound from:', uri);
-          const { sound: newSound } = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: true },
-            (status) => {
-              if (status.isLoaded) {
-                if (status.durationMillis) {
-                  setDuration(status.durationMillis);
-                }
-                setPosition(status.positionMillis);
-                setIsPlaying(status.isPlaying);
-                if (status.didJustFinish) {
-                  setIsPlaying(false);
-                  setPosition(0);
-                }
-              }
-            }
-          );
-          setSound(newSound);
+          const st: any = await sound.getStatusAsync();
+          if (st.isLoaded && st.didJustFinish) {
+            await sound.setPositionAsync(0);
+          }
+          await sound.playAsync();
           setIsPlaying(true);
         }
       } catch (err) {
@@ -754,7 +814,7 @@ export default function ChatScreen() {
           </View>
           <View style={styles.audioTimingRow}>
             <Text style={styles.audioTimeText}>
-              {duration > 0 ? formatDuration(position || duration) : '0:00'}
+              {isPlaying || position > 0 ? formatDuration(position) : (duration > 0 ? formatDuration(duration) : '0:00')}
             </Text>
             <Ionicons name="mic-outline" size={14} color="#0df" />
           </View>
@@ -948,12 +1008,21 @@ export default function ChatScreen() {
                 <Image source={{ uri: mediaSourceUri }} style={styles.bubbleImage} resizeMode="cover" />
               </TouchableOpacity>
             ) : isVideo ? (
-              <View style={styles.videoBubbleWrapper}>
+              <TouchableOpacity
+                style={styles.videoBubbleWrapper}
+                activeOpacity={0.85}
+                onPress={() => {
+                  if (mediaSourceUri) {
+                    setFullViewVideoUri(mediaSourceUri);
+                    setShowVideoModal(true);
+                  }
+                }}
+              >
                 <View style={styles.videoPlayerPlaceholder}>
                   <Ionicons name="play-circle" size={48} color="#0df" />
                   <Text style={styles.videoPlaceholderText}>Tap to Stream Video Uplink</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             ) : isAudio ? (
               <AudioMemoBubble uri={mediaSourceUri} />
             ) : isPoll && pollData ? (
@@ -1045,6 +1114,16 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* 30-Day Auto-Purge Live Countdown Banner */}
+      {getPurgeCountdown() && (
+        <View style={styles.purgeBanner}>
+          <Ionicons name="timer-outline" size={13} color="#0df" style={{ marginRight: 6 }} />
+          <Text style={styles.purgeBannerText}>
+            Auto-delete in <Text style={styles.purgeBannerTimer}>{getPurgeCountdown()}</Text>
+          </Text>
+        </View>
+      )}
+
       {/* Main Message Stream */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1108,6 +1187,13 @@ export default function ChatScreen() {
                 <Ionicons name="images" size={20} color="#fff" />
               </View>
               <Text style={styles.panelItemText}>Gallery</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.attachmentPanelItem} onPress={() => { setShowAttachmentMenu(false); handlePickVideo(); }}>
+              <View style={[styles.panelIconBg, { backgroundColor: '#ec4899' }]}>
+                <Ionicons name="videocam" size={20} color="#fff" />
+              </View>
+              <Text style={styles.panelItemText}>Video</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.attachmentPanelItem} onPress={() => { setShowAttachmentMenu(false); handlePickDocument(); }}>
@@ -1330,6 +1416,34 @@ export default function ChatScreen() {
         </SafeAreaView>
       </Modal>
 
+      {/* Full-Screen Video Player Modal */}
+      <Modal
+        visible={showVideoModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => { setShowVideoModal(false); setFullViewVideoUri(null); }}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.97)', justifyContent: 'center', alignItems: 'center' }}>
+          <StatusBar hidden />
+          <TouchableOpacity 
+            style={{ position: 'absolute', top: 40, right: 20, zIndex: 10, padding: 8, backgroundColor: 'rgba(9, 13, 22, 0.5)', borderRadius: 20 }}
+            onPress={() => { setShowVideoModal(false); setFullViewVideoUri(null); }}
+          >
+            <Ionicons name="close" size={30} color="#fff" />
+          </TouchableOpacity>
+          {fullViewVideoUri && (
+            <Video
+              source={{ uri: fullViewVideoUri }}
+              style={{ width: '100%', height: '80%' }}
+              resizeMode={ResizeMode.CONTAIN}
+              useNativeControls
+              shouldPlay
+              isLooping={false}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -1430,6 +1544,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 20,
+  },
+  purgeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 221, 255, 0.06)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 221, 255, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  purgeBannerText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  purgeBannerTimer: {
+    color: '#0df',
+    fontWeight: '800',
+    fontFamily: 'monospace',
   },
   e2eText: {
     color: '#f59e0b',

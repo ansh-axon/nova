@@ -8,10 +8,26 @@ const UserSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    unique: true,
+    sparse: true // allows existing users / bots without an email
+  },
   password: {
     type: String,
     required: true
   },
+  // Email OTP verification + password reset
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  otpCode: { type: String, default: null, select: false },
+  otpExpires: { type: Date, default: null, select: false },
+  resetCode: { type: String, default: null, select: false },
+  resetExpires: { type: Date, default: null, select: false },
   displayName: {
     type: String,
     default: function() {

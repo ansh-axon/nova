@@ -10,7 +10,7 @@ export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [ipAddress, setIpAddress] = useState(serverUrl.replace('http://', '').replace(':5000', ''));
+  const [ipAddress, setIpAddress] = useState(serverUrl);
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
@@ -23,8 +23,9 @@ export default function LoginScreen() {
 
     setSubmitting(true);
     
-    // Save IP address if changed
-    const newServerUrl = `http://${ipAddress.trim()}:5000`;
+    // Accept either a full URL (https://...) or a bare IP (auto :5000)
+    const raw = ipAddress.trim().replace(/\/+$/, '');
+    const newServerUrl = raw.includes('://') ? raw : `http://${raw}:5000`;
     if (newServerUrl !== serverUrl) {
       await setServerUrl(newServerUrl);
     }
@@ -32,8 +33,11 @@ export default function LoginScreen() {
     const success = await login(username.trim(), password, newServerUrl);
     setSubmitting(false);
 
-    if (success) {
+    if (success === true) {
       router.replace('/(tabs)');
+    } else if (success && typeof success === 'object' && success.needsVerification) {
+      showNeonAlert({ title: 'VERIFY EMAIL', message: 'Your account is not verified yet. Enter the code sent to your email.', icon: 'mail-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
+      router.push({ pathname: '/(auth)/verify' as any, params: { email: success.email || '' } });
     }
   };
 
@@ -42,12 +46,23 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
+      {/* Ambient premium background glow */}
+      <View pointerEvents="none" style={styles.ambientOrbTop} />
+      <View pointerEvents="none" style={styles.ambientOrbBottom} />
+
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Logo and Branding */}
         <View style={styles.logoContainer}>
-          <View style={styles.glowOrb} />
+          <View style={styles.logoGlow} />
+          <View style={styles.logoBadge}>
+            <Ionicons name="triangle" size={38} color="#0df" />
+          </View>
           <Text style={styles.logoText}>NOVA</Text>
-          <Text style={styles.tagline}>Connected. Secure. Boundless.</Text>
+          <View style={styles.taglineRow}>
+            <View style={styles.taglineDot} />
+            <Text style={styles.tagline}>Connected · Secure · Boundless</Text>
+            <View style={styles.taglineDot} />
+          </View>
         </View>
 
         {/* Form Container */}
@@ -90,6 +105,11 @@ export default function LoginScreen() {
               />
             </TouchableOpacity>
           </View>
+
+          {/* Forgot Password link */}
+          <TouchableOpacity style={styles.forgotWrapper} onPress={() => router.push('/(auth)/forgot' as any)}>
+            <Text style={styles.forgotText}>Forgot Password?</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Submit Button - Full Width outside form card */}
@@ -145,6 +165,12 @@ export default function LoginScreen() {
               </Text>
             </View>
           )}
+
+          {/* Premium security footer */}
+          <View style={styles.secureFooter}>
+            <Ionicons name="lock-closed" size={12} color="#334155" />
+            <Text style={styles.secureFooterText}>End-to-end encrypted · Private by design</Text>
+          </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -153,7 +179,27 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#05070d',
+  },
+  ambientOrbTop: {
+    position: 'absolute',
+    top: -120,
+    right: -80,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: '#0df',
+    opacity: 0.08,
+  },
+  ambientOrbBottom: {
+    position: 'absolute',
+    bottom: -140,
+    left: -90,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: '#3b82f6',
+    opacity: 0.07,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -162,33 +208,74 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 36,
     position: 'relative',
   },
-  glowOrb: {
+  logoGlow: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: '#0df',
-    opacity: 0.15,
-    top: -10,
+    opacity: 0.18,
+    top: -8,
+  },
+  logoBadge: {
+    width: 78,
+    height: 78,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 221, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 221, 255, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#0df',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    elevation: 12,
   },
   logoText: {
-    fontSize: 48,
+    fontSize: 44,
     fontWeight: '900',
-    color: '#0df',
-    letterSpacing: 6,
-    textShadowColor: 'rgba(0, 221, 255, 0.4)',
+    color: '#f8fafc',
+    letterSpacing: 8,
+    textShadowColor: 'rgba(0, 221, 255, 0.5)',
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 15,
+    textShadowRadius: 18,
+  },
+  taglineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  taglineDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#0df',
+    marginHorizontal: 8,
+    opacity: 0.7,
   },
   tagline: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#38bdf8',
-    marginTop: 8,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     fontWeight: '600',
+  },
+  secureFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+  },
+  secureFooterText: {
+    color: '#334155',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 6,
+    letterSpacing: 0.5,
   },
   formContainer: {
     backgroundColor: 'rgba(15, 23, 42, 0.65)',
@@ -232,6 +319,15 @@ const styles = StyleSheet.create({
   },
   eyeIcon: {
     padding: 4,
+  },
+  forgotWrapper: {
+    alignSelf: 'flex-end',
+    marginTop: 2,
+  },
+  forgotText: {
+    color: '#38bdf8',
+    fontSize: 13,
+    fontWeight: '600',
   },
   button: {
     backgroundColor: '#0df',

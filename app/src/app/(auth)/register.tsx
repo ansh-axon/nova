@@ -8,22 +8,30 @@ import { showNeonAlert } from '../../components/NeonAlert';
 export default function RegisterScreen() {
   const { register, serverUrl, setServerUrl } = useApp();
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [ipAddress, setIpAddress] = useState(serverUrl.replace('http://', '').replace(':5000', ''));
+  const [ipAddress, setIpAddress] = useState(serverUrl);
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
 
+  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
   const handleRegister = async () => {
-    if (!username.trim() || !password.trim() || !confirmPassword.trim()) {
+    if (!username.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
       showNeonAlert({ title: 'Missing Fields', message: 'Please fill in all fields to create your account.', icon: 'alert-circle-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
       return;
     }
 
     if (username.trim().length < 3) {
       showNeonAlert({ title: 'Username Too Short', message: 'Username must be at least 3 characters long.', icon: 'person-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
+      return;
+    }
+
+    if (!isValidEmail(email.trim())) {
+      showNeonAlert({ title: 'Invalid Email', message: 'Please enter a valid email address for verification.', icon: 'mail-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
       return;
     }
 
@@ -39,17 +47,21 @@ export default function RegisterScreen() {
 
     setSubmitting(true);
 
-    // Save IP address if changed
-    const newServerUrl = `http://${ipAddress.trim()}:5000`;
+    // Accept either a full URL (https://...) or a bare IP (auto :5000)
+    const raw = ipAddress.trim().replace(/\/+$/, '');
+    const newServerUrl = raw.includes('://') ? raw : `http://${raw}:5000`;
     if (newServerUrl !== serverUrl) {
       await setServerUrl(newServerUrl);
     }
 
-    const success = await register(username.trim().toLowerCase(), password, newServerUrl);
+    const result = await register(username.trim().toLowerCase(), email.trim().toLowerCase(), password, newServerUrl);
     setSubmitting(false);
 
-    if (success) {
-      router.replace('/(tabs)');
+    if (result.success && result.needsVerification) {
+      router.push({ pathname: '/(auth)/verify' as any, params: { email: result.email || email.trim().toLowerCase() } });
+    } else if (result.needsVerification && result.email) {
+      // Account already exists but unverified — let them verify
+      router.push({ pathname: '/(auth)/verify' as any, params: { email: result.email } });
     }
   };
 
@@ -58,12 +70,23 @@ export default function RegisterScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
+      {/* Ambient premium background glow */}
+      <View pointerEvents="none" style={styles.ambientOrbTop} />
+      <View pointerEvents="none" style={styles.ambientOrbBottom} />
+
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Logo and Branding */}
         <View style={styles.logoContainer}>
-          <View style={styles.glowOrb} />
+          <View style={styles.logoGlow} />
+          <View style={styles.logoBadge}>
+            <Ionicons name="triangle" size={38} color="#0df" />
+          </View>
           <Text style={styles.logoText}>NOVA</Text>
-          <Text style={styles.tagline}>Connected. Secure. Boundless.</Text>
+          <View style={styles.taglineRow}>
+            <View style={styles.taglineDot} />
+            <Text style={styles.tagline}>Connected · Secure · Boundless</Text>
+            <View style={styles.taglineDot} />
+          </View>
         </View>
 
         {/* Form Container */}
@@ -82,6 +105,21 @@ export default function RegisterScreen() {
               onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
+            />
+          </View>
+
+          {/* Email Input */}
+          <View style={styles.inputWrapper}>
+            <Ionicons name="mail-outline" size={20} color="#64748b" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email (for verification & recovery)"
+              placeholderTextColor="#475569"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
             />
           </View>
 
@@ -184,7 +222,27 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#05070d',
+  },
+  ambientOrbTop: {
+    position: 'absolute',
+    top: -120,
+    right: -80,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: '#0df',
+    opacity: 0.08,
+  },
+  ambientOrbBottom: {
+    position: 'absolute',
+    bottom: -140,
+    left: -90,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: '#3b82f6',
+    opacity: 0.07,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -193,32 +251,60 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
     position: 'relative',
   },
-  glowOrb: {
+  logoGlow: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: '#0df',
-    opacity: 0.15,
-    top: -10,
+    opacity: 0.18,
+    top: -8,
+  },
+  logoBadge: {
+    width: 78,
+    height: 78,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 221, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 221, 255, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#0df',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    elevation: 12,
   },
   logoText: {
-    fontSize: 48,
+    fontSize: 44,
     fontWeight: '900',
-    color: '#0df',
-    letterSpacing: 6,
-    textShadowColor: 'rgba(0, 221, 255, 0.4)',
+    color: '#f8fafc',
+    letterSpacing: 8,
+    textShadowColor: 'rgba(0, 221, 255, 0.5)',
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 15,
+    textShadowRadius: 18,
+  },
+  taglineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  taglineDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#0df',
+    marginHorizontal: 8,
+    opacity: 0.7,
   },
   tagline: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#38bdf8',
-    marginTop: 8,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     fontWeight: '600',
   },
   formContainer: {

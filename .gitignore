@@ -18,3 +18,11 @@ Thumbs.db
 build/
 dist/
 .gradle/
+
+# Large local binaries (not for deploy)
+cloudflared.exe
+server/cloudflared.exe
+
+# Server test uploads (user media; not for repo). Keep the folder via .gitkeep.
+server/uploads/*
+!server/uploads/.gitkeep

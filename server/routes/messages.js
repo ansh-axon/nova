@@ -169,6 +169,39 @@ router.put('/:messageId/read', auth, async (req, res) => {
   }
 });
 
+// @route   PUT api/messages/conversation/:conversationId/read-all
+// @desc    Mark all incoming messages in a conversation as read (seen). Efficient
+//          bulk operation used to drive double-tick (seen) receipts.
+router.put('/conversation/:conversationId/read-all', auth, async (req, res) => {
+  try {
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participants.includes(req.user.id)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    await Message.updateMany(
+      { conversation: req.params.conversationId, sender: { $ne: req.user.id }, status: { $ne: 'read' } },
+      { $set: { status: 'read' }, $addToSet: { readBy: { user: req.user.id, readAt: new Date() } } }
+    );
+
+    // Notify the other participants so their sent messages flip to double-tick
+    conversation.participants.forEach((pid) => {
+      const idStr = pid.toString();
+      if (idStr !== req.user.id) {
+        req.io.to(`user_${idStr}`).emit('messages_read', {
+          conversationId: req.params.conversationId,
+          readerId: req.user.id
+        });
+      }
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error marking conversation read' });
+  }
+});
+
 // @route   DELETE api/messages/:messageId
 // @desc    Delete a message (only sender can delete)
 router.delete('/:messageId', auth, async (req, res) => {

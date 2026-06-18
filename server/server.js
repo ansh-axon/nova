@@ -40,6 +40,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const activeSockets = {};
 // Store typing status: conversationId -> Set of typing users
 const typingUsers = new Map();
+// Store group/meeting call rooms: roomId -> Set of userIds currently in the call (mesh)
+const groupRooms = {};
 
 // Socket.io real-time connection logic
 io.on('connection', (socket) => {
@@ -100,9 +102,19 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Direct typing relay (1-on-1): client emits 'typing' with the recipient id,
+  // server forwards a 'typing_status' carrying senderId to that recipient.
+  socket.on('typing', (data) => {
+    if (!data || !data.recipientId) return;
+    io.to(`user_${data.recipientId}`).emit('typing_status', {
+      conversationId: data.conversationId,
+      senderId: socket.userId,
+      isTyping: !!data.isTyping
+    });
+  });
+
   // User is calling
-  socket.on('call_initiated', (data) => {
-    // data = { recipientId, callRoomId, callType }
+  socket.on('call_initiated', (data) => {    // data = { recipientId, callRoomId, callType }
     io.to(`user_${data.recipientId}`).emit('incoming_call', {
       callerId: socket.userId,
       callRoomId: data.callRoomId,
@@ -163,9 +175,99 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ──────────────────────────────────────────────────────────────
+  // GROUP / MEETING CALL SIGNALING (mesh topology)
+  // Every participant maintains a direct PeerConnection to every other
+  // participant. The server only relays signaling and tracks room membership.
+  // ──────────────────────────────────────────────────────────────
+
+  // Initiator starts a meeting and rings the invited participants
+  socket.on('group_start', (data) => {
+    try {
+      const { roomId, callType, participantIds, caller } = data;
+      if (!roomId || !Array.isArray(participantIds)) return;
+      console.log(`[Group] ${socket.userId} started meeting ${roomId} (${callType}) inviting ${participantIds.length}`);
+      participantIds.forEach((pid) => {
+        if (pid && pid !== socket.userId) {
+          io.to(`user_${pid}`).emit('group_incoming', { roomId, callType, caller });
+        }
+      });
+    } catch (err) {
+      console.error('[Group] Error in group_start:', err);
+    }
+  });
+
+  // A participant joins the mesh room
+  socket.on('group_join', (data) => {
+    try {
+      const { roomId } = data;
+      if (!roomId) return;
+      if (!groupRooms[roomId]) groupRooms[roomId] = new Set();
+      const existingPeers = Array.from(groupRooms[roomId]).filter((id) => id !== socket.userId);
+
+      groupRooms[roomId].add(socket.userId);
+      socket.join(`group_${roomId}`);
+      socket.groupRooms = socket.groupRooms || new Set();
+      socket.groupRooms.add(roomId);
+
+      console.log(`[Group] ${socket.userId} joined ${roomId}. Existing peers: [${existingPeers.join(', ')}]`);
+
+      // Tell the joiner who is already in the room (joiner initiates offers to them)
+      socket.emit('group_existing_peers', { roomId, peers: existingPeers });
+      // Tell existing members that a new peer joined (they wait for the joiner's offer)
+      socket.to(`group_${roomId}`).emit('group_peer_joined', { roomId, userId: socket.userId });
+    } catch (err) {
+      console.error('[Group] Error in group_join:', err);
+    }
+  });
+
+  socket.on('group_offer', (data) => {
+    const { roomId, targetId, offer } = data;
+    if (!targetId || !offer) return;
+    io.to(`user_${targetId}`).emit('group_offer', { roomId, senderId: socket.userId, offer });
+  });
+
+  socket.on('group_answer', (data) => {
+    const { roomId, targetId, answer } = data;
+    if (!targetId || !answer) return;
+    io.to(`user_${targetId}`).emit('group_answer', { roomId, senderId: socket.userId, answer });
+  });
+
+  socket.on('group_ice', (data) => {
+    const { roomId, targetId, candidate } = data;
+    if (!targetId || !candidate) return;
+    io.to(`user_${targetId}`).emit('group_ice', { roomId, senderId: socket.userId, candidate });
+  });
+
+  socket.on('group_leave', (data) => {
+    try {
+      const { roomId } = data;
+      if (!roomId) return;
+      leaveGroupRoom(socket, roomId);
+    } catch (err) {
+      console.error('[Group] Error in group_leave:', err);
+    }
+  });
+
+  // Helper to remove a socket from a group room and notify peers
+  function leaveGroupRoom(sock, roomId) {
+    if (groupRooms[roomId]) {
+      groupRooms[roomId].delete(sock.userId);
+      if (groupRooms[roomId].size === 0) delete groupRooms[roomId];
+    }
+    sock.leave(`group_${roomId}`);
+    if (sock.groupRooms) sock.groupRooms.delete(roomId);
+    io.to(`group_${roomId}`).emit('group_peer_left', { roomId, userId: sock.userId });
+    console.log(`[Group] ${sock.userId} left ${roomId}`);
+  }
+
   // User disconnects
   socket.on('disconnect', async () => {
     console.log(`Socket disconnected: ${socket.id}`);
+    // Clean up any group call rooms this socket was part of
+    if (socket.groupRooms) {
+      Array.from(socket.groupRooms).forEach((roomId) => leaveGroupRoom(socket, roomId));
+    }
     if (socket.userId) {
       delete activeSockets[socket.userId];
       

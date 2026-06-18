@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io, Socket } from 'socket.io-client';
 import { showNeonAlert } from '../components/NeonAlert';
+import { getIceServers, getIceServersSync } from '../utils/iceConfig';
 
 export interface User {
   id: string;
   username: string;
+  email?: string;
   displayName: string;
   about: string;
   avatarUrl: string;
@@ -71,13 +74,18 @@ interface AppContextType {
   callHistory: CallRecord[];
   setServerUrl: (url: string) => void;
   setActiveConversationId: (id: string | null) => void;
-  login: (username: string, password: string, customUrl?: string) => Promise<boolean>;
-  register: (username: string, password: string, customUrl?: string) => Promise<boolean>;
+  login: (username: string, password: string, customUrl?: string) => Promise<boolean | { needsVerification: boolean; email?: string }>;
+  register: (username: string, email: string, password: string, customUrl?: string) => Promise<{ success: boolean; needsVerification?: boolean; email?: string }>;
+  verifyOtp: (email: string, code: string) => Promise<boolean>;
+  resendOtp: (email: string) => Promise<boolean>;
+  forgotPassword: (email: string) => Promise<boolean>;
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<boolean>;
   logout: () => Promise<void>;
   updateProfile: (displayName: string, about: string, avatarUrl: string) => Promise<boolean>;
   fetchUsers: () => Promise<void>;
   fetchConversations: () => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
+  markConversationRead: (conversationId: string) => Promise<void>;
   sendMessage: (
     conversationId: string, 
     text: string, 
@@ -119,6 +127,17 @@ interface AppContextType {
   acceptCall: (callId: string) => Promise<void>;
   rejectCall: (callId: string) => Promise<void>;
   endCall: (callId: string, duration: number) => Promise<void>;
+  // ── Group / Meeting calls (mesh) ──
+  groupCall: any | null;
+  incomingGroupCall: any | null;
+  groupCallState: 'connected' | null;
+  groupLocalStream: any | null;
+  groupRemoteStreams: { [userId: string]: any };
+  groupParticipants: { [userId: string]: User };
+  startGroupCall: (participantIds: string[], callType: 'voice' | 'video', participantUsers?: User[]) => Promise<void>;
+  acceptGroupCall: () => Promise<void>;
+  rejectGroupCall: () => void;
+  leaveGroupCall: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -142,10 +161,37 @@ const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs = 6000
   }
 };
 
+// Returns a stable per-install device identifier, generating and persisting one on
+// first use. Used to enforce "one account per device" at registration time.
+const getOrCreateDeviceId = async (): Promise<string> => {
+  try {
+    let id = await AsyncStorage.getItem('deviceId');
+    if (!id) {
+      id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
+      await AsyncStorage.setItem('deviceId', id);
+    }
+    return id;
+  } catch {
+    return `dev_fallback_${Date.now()}`;
+  }
+};
+
+// Shared ICE configuration (STUN + free TURN) used by both 1-on-1 and group mesh calls.
+const GROUP_PC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+  iceCandidatePoolSize: 10,
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [serverUrl, setServerUrlState] = useState<string>('http://192.168.0.111:5000');
+  const [serverUrl, setServerUrlState] = useState<string>('https://analyze-border-magnetic-addresses.trycloudflare.com');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -185,6 +231,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const remoteStreamRef = useRef<any>(null);
   const hasCreatedOfferRef = useRef<boolean>(false);
   const socketRef = useRef<any>(null);
+  // Buffers remote ICE candidates that arrive before the remote description is set.
+  // Without this, early candidates throw InvalidStateError and get dropped, which
+  // breaks media flow (call "connects" but no audio/video). Flushed once remote desc is set.
+  const pendingCandidatesRef = useRef<any[]>([]);
+
+  // ── Group / Meeting call (mesh) state & refs ──
+  const [groupCall, setGroupCall] = useState<any | null>(null);
+  const [incomingGroupCall, setIncomingGroupCall] = useState<any | null>(null);
+  const [groupCallState, setGroupCallState] = useState<'connected' | null>(null);
+  const [groupLocalStream, setGroupLocalStream] = useState<any | null>(null);
+  const [groupRemoteStreams, setGroupRemoteStreams] = useState<{ [userId: string]: any }>({});
+  const [groupParticipants, setGroupParticipants] = useState<{ [userId: string]: User }>({});
+  const groupPeersRef = useRef<{ [userId: string]: any }>({});
+  const groupPendingIceRef = useRef<{ [userId: string]: any[] }>({});
+  const groupLocalStreamRef = useRef<any>(null);
+  const groupRoomIdRef = useRef<string | null>(null);
+  const groupCallTypeRef = useRef<'voice' | 'video'>('voice');
+  useEffect(() => { groupLocalStreamRef.current = groupLocalStream; }, [groupLocalStream]);
 
   // Keep refs in sync with state for use inside socket event closures (prevents stale closures)
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
@@ -195,6 +259,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     console.log('Cleaning up WebRTC call streams...');
     isInitializingRef.current = false;
     hasCreatedOfferRef.current = false;
+    pendingCandidatesRef.current = [];
     if (pcRef.current) {
       try {
         pcRef.current.close();
@@ -242,30 +307,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         shouldRouteThroughEarpieceAndroid: false
       });
 
-      // Ultra-lightweight hosted audio files (under 150KB) to ensure instant playback over mobile data
-      const dialingUrl = 'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/outgoingRinging.wav';
-      
-      let ringtoneUrl = 'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/ring.wav';
-      if (selectedRingtone === 'Neon Horizon') {
-        ringtoneUrl = 'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/ring.wav';
-      } else if (selectedRingtone === 'Interstellar Pulsar') {
-        ringtoneUrl = 'https://cdnjs.cloudflare.com/ajax/libs/ion-sound/3.0.7/sounds/bell_ring.mp3';
+      // Candidate sources tried in order. Remote URLs can fail on private/LAN/offline
+      // networks, so we try several mirrors and rely on Vibration (see ringing effect)
+      // as a guaranteed fallback alert on the receiver's device.
+      const dialingUrls = [
+        'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/outgoingRinging.wav',
+        'https://cdn.jsdelivr.net/gh/jitsi/jitsi-meet@master/sounds/outgoingRinging.wav',
+      ];
+
+      let ringtoneUrls = [
+        'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/incomingMessage.wav',
+        'https://cdn.jsdelivr.net/gh/jitsi/jitsi-meet@master/sounds/ring.wav',
+        'https://raw.githubusercontent.com/jitsi/jitsi-meet/master/sounds/ring.wav',
+      ];
+      if (selectedRingtone === 'Interstellar Pulsar') {
+        ringtoneUrls = [
+          'https://cdnjs.cloudflare.com/ajax/libs/ion-sound/3.0.7/sounds/bell_ring.mp3',
+          ...ringtoneUrls,
+        ];
       }
 
-      const activeUrl = type === 'dialing' ? dialingUrl : ringtoneUrl;
-      console.log(`[SoundEngine] Loading and playing ${type} tone from:`, activeUrl);
+      const candidates = type === 'dialing' ? dialingUrls : ringtoneUrls;
+      console.log(`[SoundEngine] Attempting to play ${type} tone, ${candidates.length} source(s)`);
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: activeUrl },
-        { shouldPlay: true, isLooping: true, volume: 0.8 }
-      );
-      ringtoneSoundRef.current = sound;
+      let loaded = false;
+      for (const url of candidates) {
+        try {
+          const { sound } = await Audio.Sound.createAsync(
+            { uri: url },
+            { shouldPlay: true, isLooping: true, volume: 1.0 }
+          );
+          ringtoneSoundRef.current = sound;
+          loaded = true;
+          console.log(`[SoundEngine] Playing ${type} tone from:`, url);
+          break;
+        } catch (e) {
+          console.warn(`[SoundEngine] Source failed, trying next:`, url);
+        }
+      }
+      if (!loaded) {
+        console.warn('[SoundEngine] All audio sources failed; relying on vibration only.');
+      }
     } catch (err) {
       console.error('Failed to play call sound:', err);
     }
   }, [selectedRingtone]);
 
   const stopCallSound = useCallback(async () => {
+    Vibration.cancel();
     if (ringtoneSoundRef.current) {
       try {
         console.log('[SoundEngine] Stopping and unloading call sound...');
@@ -340,14 +429,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { RTCPeerConnection, mediaDevices } = require('react-native-webrtc');
       
       const pcConfig = {
-        iceServers: [
-          // Google STUN servers (free, reliable, sufficient for same-network calls)
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-        ]
+        iceServers: await getIceServers(),
+        iceCandidatePoolSize: 10,
       };
       
       const pc = new RTCPeerConnection(pcConfig);
@@ -564,6 +647,173 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // ──────────────────────────────────────────────────────────────
+  // GROUP / MEETING CALLS (mesh): each participant holds a direct
+  // PeerConnection to every other participant. Good for ~4-6 video
+  // and more for voice. The server only relays signaling.
+  // ──────────────────────────────────────────────────────────────
+
+  const getGroupLocalMedia = async (callType: 'voice' | 'video') => {
+    if (groupLocalStreamRef.current) return groupLocalStreamRef.current;
+    // Warm the TURN/ICE cache so mesh peers get reliable servers
+    await getIceServers();
+    try {
+      const { Audio } = require('expo-av');
+      const { mediaDevices } = require('react-native-webrtc');
+
+      const micPerm = await Audio.requestPermissionsAsync();
+      if (micPerm.status !== 'granted') {
+        showNeonAlert({ title: 'MICROPHONE BLOCKED', message: 'Group calls require microphone access.', icon: 'mic-off-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return null;
+      }
+      if (callType === 'video') {
+        const { Camera } = require('expo-camera');
+        await Camera.requestCameraPermissionsAsync();
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldRouteThroughEarpieceAndroid: false,
+        staysActiveInBackground: true,
+        interruptionMode: 0
+      });
+
+      let stream;
+      try {
+        stream = await mediaDevices.getUserMedia({
+          audio: true,
+          video: callType === 'video' ? { facingMode: 'user' } : false
+        });
+      } catch (e) {
+        console.warn('[Group] getUserMedia failed, falling back to audio only:', e);
+        stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+      }
+      groupLocalStreamRef.current = stream;
+      setGroupLocalStream(stream);
+      return stream;
+    } catch (err) {
+      console.error('[Group] getGroupLocalMedia error:', err);
+      return null;
+    }
+  };
+
+  // Creates (or returns existing) a mesh peer connection to a specific participant.
+  const createGroupPeer = (peerId: string, _isInitiator: boolean) => {
+    if (groupPeersRef.current[peerId]) return groupPeersRef.current[peerId];
+    const { RTCPeerConnection } = require('react-native-webrtc');
+    const pc = new RTCPeerConnection({ iceServers: getIceServersSync(), iceCandidatePoolSize: 10 });
+    groupPeersRef.current[peerId] = pc;
+    if (!groupPendingIceRef.current[peerId]) groupPendingIceRef.current[peerId] = [];
+
+    const localStream = groupLocalStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track: any) => pc.addTrack(track, localStream));
+    }
+
+    pc.ontrack = (event: any) => {
+      if (event.streams && event.streams[0]) {
+        setGroupRemoteStreams((prev) => ({ ...prev, [peerId]: event.streams[0] }));
+      }
+    };
+    pc.onicecandidate = (event: any) => {
+      if (event.candidate && socketRef.current && groupRoomIdRef.current) {
+        socketRef.current.emit('group_ice', { roomId: groupRoomIdRef.current, targetId: peerId, candidate: event.candidate });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      console.log(`[Group] Peer ${peerId} connection state:`, pc.connectionState);
+    };
+    return pc;
+  };
+
+  const flushGroupIce = async (peerId: string) => {
+    const pc = groupPeersRef.current[peerId];
+    const pending = groupPendingIceRef.current[peerId] || [];
+    groupPendingIceRef.current[peerId] = [];
+    if (!pc || pending.length === 0) return;
+    const { RTCIceCandidate } = require('react-native-webrtc');
+    for (const c of pending) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
+      catch (e: any) { console.warn('[Group] flush ice err:', e.message); }
+    }
+  };
+
+  const cleanupGroupCall = () => {
+    Object.values(groupPeersRef.current).forEach((pc: any) => { try { pc.close(); } catch (e) {} });
+    groupPeersRef.current = {};
+    groupPendingIceRef.current = {};
+    const ls = groupLocalStreamRef.current;
+    if (ls) { try { ls.getTracks().forEach((t: any) => t.stop()); } catch (e) {} }
+    groupLocalStreamRef.current = null;
+    groupRoomIdRef.current = null;
+    setGroupLocalStream(null);
+    setGroupRemoteStreams({});
+    setGroupParticipants({});
+  };
+
+  const startGroupCall = async (participantIds: string[], callType: 'voice' | 'video', participantUsers: User[] = []) => {
+    if (!user || !socketRef.current) return;
+    const roomId = `meet_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    groupRoomIdRef.current = roomId;
+    groupCallTypeRef.current = callType;
+
+    const stream = await getGroupLocalMedia(callType);
+    if (!stream) { groupRoomIdRef.current = null; return; }
+
+    const infoMap: { [id: string]: User } = {};
+    participantUsers.forEach((u) => { if (u) infoMap[u.id] = u; });
+    setGroupParticipants(infoMap);
+    setGroupCall({ roomId, callType, isInitiator: true, participantIds });
+    setGroupCallState('connected');
+
+    socketRef.current.emit('group_start', {
+      roomId,
+      callType,
+      participantIds,
+      caller: { id: user.id, name: user.displayName || user.username, avatar: user.avatarUrl }
+    });
+    socketRef.current.emit('group_join', { roomId });
+  };
+
+  const acceptGroupCall = async () => {
+    const inc = incomingGroupCall;
+    if (!inc || !socketRef.current) return;
+    groupRoomIdRef.current = inc.roomId;
+    groupCallTypeRef.current = inc.callType;
+
+    const stream = await getGroupLocalMedia(inc.callType);
+    if (!stream) { groupRoomIdRef.current = null; return; }
+
+    if (inc.caller) {
+      setGroupParticipants((prev) => ({
+        ...prev,
+        [inc.caller.id]: { id: inc.caller.id, displayName: inc.caller.name, avatarUrl: inc.caller.avatar } as User
+      }));
+    }
+    setGroupCall({ roomId: inc.roomId, callType: inc.callType, isInitiator: false });
+    setGroupCallState('connected');
+    setIncomingGroupCall(null);
+    socketRef.current.emit('group_join', { roomId: inc.roomId });
+  };
+
+  const rejectGroupCall = () => {
+    setIncomingGroupCall(null);
+  };
+
+  const leaveGroupCall = () => {
+    const roomId = groupRoomIdRef.current;
+    if (roomId && socketRef.current) socketRef.current.emit('group_leave', { roomId });
+    cleanupGroupCall();
+    setGroupCall(null);
+    setGroupCallState(null);
+    setIncomingGroupCall(null);
+    try {
+      const { Audio } = require('expo-av');
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: false, shouldRouteThroughEarpieceAndroid: false, staysActiveInBackground: false, interruptionMode: 1 });
+    } catch (e) {}
+  };
+
   // Custom setter for server URL that saves to AsyncStorage
   const setServerUrl = async (url: string) => {
     const formattedUrl = url.trim().replace(/\/$/, ''); // Remove trailing slash
@@ -576,7 +826,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loadSession = async () => {
       try {
         const storedUrl = await AsyncStorage.getItem('serverUrl');
-        const defaultUrl = 'http://192.168.0.111:5000';
+        const defaultUrl = 'https://analyze-border-magnetic-addresses.trycloudflare.com';
         if (storedUrl) {
           setServerUrlState(storedUrl);
         } else {
@@ -639,6 +889,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 10
     });
+
+    // Flushes any ICE candidates that were buffered while waiting for the remote
+    // description. Declared here so all WebRTC socket handlers below can reuse it.
+    async function flushPendingCandidates() {
+      const pc = pcRef.current;
+      if (!pc || pendingCandidatesRef.current.length === 0) return;
+      const { RTCIceCandidate } = require('react-native-webrtc');
+      const queued = pendingCandidatesRef.current;
+      pendingCandidatesRef.current = [];
+      console.log(`[WebRTC] Flushing ${queued.length} buffered ICE candidate(s)`);
+      for (const candidate of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          const err = e as any;
+          console.warn('Error flushing buffered ICE candidate:', err.message);
+        }
+      }
+    }
 
     socketInstance.on('connect', () => {
       console.log('Socket.io connected successfully');
@@ -719,6 +988,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     });
 
+    // The server actually emits 'user_online' / 'user_offline' — wire both so the
+    // live online dots update in real time.
+    const applyPresence = (userId: string, isOnline: boolean, lastSeen?: string) => {
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isOnline, lastSeen } : u)));
+      setConversations((prev) =>
+        prev.map((c) => ({
+          ...c,
+          participants: c.participants.map((p) => (p.id === userId ? { ...p, isOnline, lastSeen } : p))
+        }))
+      );
+    };
+    socketInstance.on('user_online', (data: { userId: string; isOnline?: boolean }) => {
+      applyPresence(data.userId, true);
+    });
+    socketInstance.on('user_offline', (data: { userId: string; lastSeen?: string }) => {
+      applyPresence(data.userId, false, data.lastSeen);
+    });
+
+    // Read receipts: the other participant read our messages → flip them to 'read' (double tick)
+    socketInstance.on('messages_read', (data: { conversationId: string; readerId: string }) => {
+      setMessages((prev) => {
+        const convMsgs = prev[data.conversationId];
+        if (!convMsgs) return prev;
+        const updated = convMsgs.map((m) => {
+          const senderId = typeof m.sender === 'string' ? m.sender : (m.sender as any)?._id || (m.sender as any)?.id;
+          return senderId !== data.readerId ? { ...m, status: 'read' as const } : m;
+        });
+        return { ...prev, [data.conversationId]: updated };
+      });
+    });
+
     socketInstance.on('typing_status', (data: { conversationId: string; senderId: string; isTyping: boolean }) => {
       // Handle active conversation typing indicators in UI
       console.log('Typing status update:', data);
@@ -793,6 +1093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          await flushPendingCandidates();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           
@@ -815,6 +1116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const { RTCSessionDescription } = require('react-native-webrtc');
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          await flushPendingCandidates();
           console.log('WebRTC remote description set successfully');
         } catch (e) {
           console.error('Error setting remote description:', e);
@@ -824,20 +1126,106 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     socketInstance.on('webrtc_ice_candidate', async (data) => {
       console.log('Socket WebRTC ICE candidate received');
+      if (!data.candidate) return;
       const pc = pcRef.current;
-      if (pc && data.candidate) {
+      // Only add candidates once the remote description exists; otherwise buffer them.
+      // addIceCandidate before setRemoteDescription throws InvalidStateError and the
+      // candidate is lost, which is a common cause of "connected but no media".
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         const { RTCIceCandidate } = require('react-native-webrtc');
         try {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           console.log('Added remote ICE candidate successfully');
         } catch (e) {
-          // Ignore errors for candidates that arrive before remote description is set
           const err = e as any;
-          if (err.name !== 'InvalidStateError') {
-            console.warn('Error adding ICE candidate:', err.message);
-          }
+          console.warn('Error adding ICE candidate:', err.message);
+        }
+      } else {
+        console.log('Remote description not ready, buffering ICE candidate');
+        pendingCandidatesRef.current.push(data.candidate);
+      }
+    });
+
+    // ── GROUP / MEETING mesh signaling handlers ──
+    socketInstance.on('group_incoming', (data) => {
+      console.log('[Group] Incoming meeting:', data.roomId);
+      if (groupRoomIdRef.current === data.roomId) return; // already in this room
+      setIncomingGroupCall(data);
+    });
+
+    socketInstance.on('group_existing_peers', async (data) => {
+      const { roomId, peers } = data;
+      console.log('[Group] Existing peers to offer:', peers);
+      for (const peerId of peers) {
+        try {
+          const pc = createGroupPeer(peerId, true);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socketInstance.emit('group_offer', { roomId, targetId: peerId, offer });
+        } catch (e) {
+          console.error('[Group] Error creating offer for', peerId, e);
         }
       }
+    });
+
+    socketInstance.on('group_peer_joined', (data) => {
+      // A newer participant joined; they will send us an offer. Nothing to do here.
+      console.log('[Group] Peer joined (will offer to us):', data.userId);
+    });
+
+    socketInstance.on('group_offer', async (data) => {
+      const { roomId, senderId, offer } = data;
+      const { RTCSessionDescription } = require('react-native-webrtc');
+      try {
+        const pc = createGroupPeer(senderId, false);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await flushGroupIce(senderId);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socketInstance.emit('group_answer', { roomId, targetId: senderId, answer });
+      } catch (e) {
+        console.error('[Group] Error handling offer from', senderId, e);
+      }
+    });
+
+    socketInstance.on('group_answer', async (data) => {
+      const { senderId, answer } = data;
+      const pc = groupPeersRef.current[senderId];
+      if (!pc) return;
+      const { RTCSessionDescription } = require('react-native-webrtc');
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        await flushGroupIce(senderId);
+      } catch (e) {
+        console.error('[Group] Error setting answer from', senderId, e);
+      }
+    });
+
+    socketInstance.on('group_ice', async (data) => {
+      const { senderId, candidate } = data;
+      if (!candidate) return;
+      const pc = groupPeersRef.current[senderId];
+      const { RTCIceCandidate } = require('react-native-webrtc');
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+        catch (e: any) { console.warn('[Group] add ice err:', e.message); }
+      } else {
+        if (!groupPendingIceRef.current[senderId]) groupPendingIceRef.current[senderId] = [];
+        groupPendingIceRef.current[senderId].push(candidate);
+      }
+    });
+
+    socketInstance.on('group_peer_left', (data) => {
+      const { userId } = data;
+      console.log('[Group] Peer left:', userId);
+      const pc = groupPeersRef.current[userId];
+      if (pc) { try { pc.close(); } catch (e) {} delete groupPeersRef.current[userId]; }
+      delete groupPendingIceRef.current[userId];
+      setGroupRemoteStreams((prev) => {
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
     });
 
     setSocket(socketInstance);
@@ -916,88 +1304,187 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (callState === 'ringing') {
       if (incomingCall) {
-        // We are receiving the call (Receiver B) -> Play Ringtone
+        // We are receiving the call (Receiver B) -> Play Ringtone + vibrate the phone.
+        // Vibration is a guaranteed alert even if the network audio fails to load.
         playCallSound('ringing');
+        // Repeating pattern: wait 0ms, vibrate 800ms, pause 1000ms, ... (loop)
+        Vibration.vibrate([0, 800, 1000], true);
       } else {
         // We are making the call (Caller A) -> Play Dialing tone
         playCallSound('dialing');
       }
     } else {
-      // Not ringing anymore -> Stop any playing sound
+      // Not ringing anymore -> Stop any playing sound and vibration
+      Vibration.cancel();
       stopCallSound();
     }
 
     return () => {
+      Vibration.cancel();
       stopCallSound();
     };
   }, [callState, incomingCall, playCallSound, stopCallSound]);
 
+  // Ring + vibrate for an incoming GROUP/meeting call until it is accepted or dismissed.
+  useEffect(() => {
+    if (incomingGroupCall && !groupCall) {
+      playCallSound('ringing');
+      Vibration.vibrate([0, 800, 1000], true);
+      return () => {
+        Vibration.cancel();
+        stopCallSound();
+      };
+    }
+  }, [incomingGroupCall, groupCall, playCallSound, stopCallSound]);
+
   // REST API: Register
-  const register = async (username: string, password: string, customUrl?: string): Promise<boolean> => {
+  const register = async (username: string, email: string, password: string, customUrl?: string): Promise<{ success: boolean; needsVerification?: boolean; email?: string }> => {
     const activeUrl = customUrl || serverUrl;
     try {
+      const deviceId = await getOrCreateDeviceId();
       const response = await fetchWithTimeout(`${activeUrl}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      }, 6000);
+        body: JSON.stringify({ username, email, password, deviceId })
+      }, 8000);
 
       const data = await response.json();
       if (!response.ok) {
         showNeonAlert({ title: 'SIGN UP FAILED', message: data.message || 'Check server connection.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return { success: false, needsVerification: data.needsVerification, email: data.email };
+      }
+      // Account created; user must now verify the emailed OTP.
+      return { success: true, needsVerification: true, email: data.email };
+    } catch (err: any) {
+      console.error(err);
+      showNeonAlert({ title: 'CONNECTION ERROR', message: err.message === 'Connection Timeout' ? `Server connection timed out at ${activeUrl}. Verify your server IP and that it is running.` : `Failed to connect to backend server at ${activeUrl}.`, icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      return { success: false };
+    }
+  };
+
+  // Stores token + user (shared by verifyOtp and login)
+  const persistAuth = async (data: any) => {
+    const formattedUser: User = {
+      id: data.user.id,
+      username: data.user.username,
+      email: data.user.email,
+      displayName: data.user.displayName,
+      about: data.user.about,
+      avatarUrl: data.user.avatarUrl
+    };
+    setToken(data.token);
+    setUser(formattedUser);
+    await AsyncStorage.setItem('token', data.token);
+    await AsyncStorage.setItem('user', JSON.stringify(formattedUser));
+  };
+
+  // REST API: Verify email OTP (logs the user in on success)
+  const verifyOtp = async (email: string, code: string): Promise<boolean> => {
+    try {
+      const response = await fetchWithTimeout(`${serverUrl}/api/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code })
+      }, 8000);
+      const data = await response.json();
+      if (!response.ok) {
+        showNeonAlert({ title: 'VERIFICATION FAILED', message: data.message || 'Invalid code.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
         return false;
       }
-
-      const formattedUser: User = {
-        id: data.user.id,
-        username: data.user.username,
-        displayName: data.user.displayName,
-        about: data.user.about,
-        avatarUrl: data.user.avatarUrl
-      };
-
-      setToken(data.token);
-      setUser(formattedUser);
-
-      await AsyncStorage.setItem('token', data.token);
-      await AsyncStorage.setItem('user', JSON.stringify(formattedUser));
+      await persistAuth(data);
       return true;
     } catch (err: any) {
       console.error(err);
-      showNeonAlert({ title: 'CONNECTION ERROR', message: err.message === 'Connection Timeout' ? `Server connection timed out at ${activeUrl}. Please verify your server IP address and make sure it is running.` : `Failed to connect to backend server at ${activeUrl}. Ensure the server is running.`, icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Failed to reach the server.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      return false;
+    }
+  };
+
+  // REST API: Resend verification OTP
+  const resendOtp = async (email: string): Promise<boolean> => {
+    try {
+      const response = await fetchWithTimeout(`${serverUrl}/api/auth/resend-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      }, 8000);
+      const data = await response.json();
+      if (!response.ok) {
+        showNeonAlert({ title: 'RESEND FAILED', message: data.message || 'Could not resend code.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return false;
+      }
+      showNeonAlert({ title: 'CODE SENT', message: data.message || 'A new code is on its way.', icon: 'mail-outline', borderColor: '#10b981', iconColor: '#10b981' });
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  };
+
+  // REST API: Forgot password — request a reset code
+  const forgotPassword = async (email: string): Promise<boolean> => {
+    try {
+      const response = await fetchWithTimeout(`${serverUrl}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      }, 8000);
+      const data = await response.json();
+      if (!response.ok) {
+        showNeonAlert({ title: 'REQUEST FAILED', message: data.message || 'Could not send reset code.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return false;
+      }
+      showNeonAlert({ title: 'CHECK YOUR EMAIL', message: data.message || 'Reset code sent.', icon: 'mail-outline', borderColor: '#10b981', iconColor: '#10b981' });
+      return true;
+    } catch (err) {
+      console.error(err);
+      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Failed to reach the server.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      return false;
+    }
+  };
+
+  // REST API: Reset password using the emailed code
+  const resetPassword = async (email: string, code: string, newPassword: string): Promise<boolean> => {
+    try {
+      const response = await fetchWithTimeout(`${serverUrl}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, newPassword })
+      }, 8000);
+      const data = await response.json();
+      if (!response.ok) {
+        showNeonAlert({ title: 'RESET FAILED', message: data.message || 'Could not reset password.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return false;
+      }
+      showNeonAlert({ title: 'PASSWORD UPDATED', message: data.message || 'You can now log in.', icon: 'checkmark-circle-outline', borderColor: '#10b981', iconColor: '#10b981' });
+      return true;
+    } catch (err) {
+      console.error(err);
+      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Failed to reach the server.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
       return false;
     }
   };
 
   // REST API: Login
-  const login = async (username: string, password: string, customUrl?: string): Promise<boolean> => {
+  const login = async (username: string, password: string, customUrl?: string): Promise<boolean | { needsVerification: boolean; email?: string }> => {
     const activeUrl = customUrl || serverUrl;
     try {
       const response = await fetchWithTimeout(`${activeUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
-      }, 6000);
+      }, 8000);
 
       const data = await response.json();
       if (!response.ok) {
+        if (data.needsVerification) {
+          return { needsVerification: true, email: data.email };
+        }
         showNeonAlert({ title: 'LOGIN FAILED', message: data.message || 'Invalid username or password.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
         return false;
       }
 
-      const formattedUser: User = {
-        id: data.user.id,
-        username: data.user.username,
-        displayName: data.user.displayName,
-        about: data.user.about,
-        avatarUrl: data.user.avatarUrl
-      };
-
-      setToken(data.token);
-      setUser(formattedUser);
-
-      await AsyncStorage.setItem('token', data.token);
-      await AsyncStorage.setItem('user', JSON.stringify(formattedUser));
+      await persistAuth(data);
       return true;
     } catch (err: any) {
       console.error(err);
@@ -1201,6 +1688,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         [conversationId]: (prev[conversationId] || []).filter((m) => m._id !== tempId)
       }));
       showNeonAlert({ title: 'SEND ERROR', message: 'Message failed to send. Check server connection.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+    }
+  };
+
+  // REST API: Mark all incoming messages in a conversation as read (drives double-tick)
+  const markConversationRead = async (conversationId: string): Promise<void> => {
+    if (!token || !conversationId) return;
+    try {
+      await fetch(`${serverUrl}/api/messages/conversation/${conversationId}/read-all`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+    } catch (err) {
+      console.log('markConversationRead failed:', err);
     }
   };
 
@@ -1464,11 +1967,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveConversationId,
         login,
         register,
+        verifyOtp,
+        resendOtp,
+        forgotPassword,
+        resetPassword,
         logout,
         updateProfile,
         fetchUsers,
         fetchConversations,
         loadMessages,
+        markConversationRead,
         sendMessage,
         startConversation,
         fetchStatuses,
@@ -1498,7 +2006,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCallDuration,
         acceptCall,
         rejectCall,
-        endCall
+        endCall,
+        groupCall,
+        incomingGroupCall,
+        groupCallState,
+        groupLocalStream,
+        groupRemoteStreams,
+        groupParticipants,
+        startGroupCall,
+        acceptGroupCall,
+        rejectGroupCall,
+        leaveGroupCall
       }}
     >
       {children}

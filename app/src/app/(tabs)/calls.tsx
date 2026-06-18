@@ -7,7 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 const { width, height } = Dimensions.get('window');
 
 export default function CallsScreen() {
-  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog } = useApp();
+  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall } = useApp();
   const isFocused = useIsFocused();
 
   // Call simulation states
@@ -19,13 +19,37 @@ export default function CallsScreen() {
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  // Group meeting starter states
+  const [showMeeting, setShowMeeting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [meetingType, setMeetingType] = useState<'voice' | 'video'>('video');
+
   // Fetch call log history when focused
   useEffect(() => {
     if (isFocused) {
       setLoading(true);
       fetchCallHistory().then(() => setLoading(false));
+      fetchUsers();
     }
   }, [isFocused]);
+
+  const otherUsers = (users || []).filter((u) => u.id !== user?.id && u.username !== 'meta_ai');
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 14) return prev; // 15 total incl. self
+      return [...prev, id];
+    });
+  };
+
+  const handleStartMeeting = () => {
+    if (selectedIds.length === 0) return;
+    const selectedUsers = otherUsers.filter((u) => selectedIds.includes(u.id));
+    startGroupCall(selectedIds, meetingType, selectedUsers);
+    setShowMeeting(false);
+    setSelectedIds([]);
+  };
 
   // Connect simulation transitions and duration timer
   useEffect(() => {
@@ -297,6 +321,85 @@ export default function CallsScreen() {
           </View>
         </Modal>
       )}
+
+      {/* New Meeting Floating Button */}
+      {!activeCall && (
+        <TouchableOpacity style={styles.fab} onPress={() => setShowMeeting(true)} activeOpacity={0.85}>
+          <Ionicons name="people" size={24} color="#090d16" />
+          <Text style={styles.fabText}>Meeting</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Group Meeting Participant Picker */}
+      <Modal animationType="slide" transparent visible={showMeeting} onRequestClose={() => setShowMeeting(false)}>
+        <View style={styles.pickerBackdrop}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHandle} />
+            <Text style={styles.pickerTitle}>NEW GROUP MEETING</Text>
+            <Text style={styles.pickerSub}>Select up to 14 participants ({selectedIds.length}/14)</Text>
+
+            {/* Voice / Video toggle */}
+            <View style={styles.typeRow}>
+              <TouchableOpacity
+                style={[styles.typeBtn, meetingType === 'video' && styles.typeBtnActive]}
+                onPress={() => setMeetingType('video')}
+              >
+                <Ionicons name="videocam" size={18} color={meetingType === 'video' ? '#090d16' : '#cbd5e1'} />
+                <Text style={[styles.typeBtnText, meetingType === 'video' && styles.typeBtnTextActive]}>Video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.typeBtn, meetingType === 'voice' && styles.typeBtnActive]}
+                onPress={() => setMeetingType('voice')}
+              >
+                <Ionicons name="call" size={18} color={meetingType === 'voice' ? '#090d16' : '#cbd5e1'} />
+                <Text style={[styles.typeBtnText, meetingType === 'voice' && styles.typeBtnTextActive]}>Voice</Text>
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={otherUsers}
+              keyExtractor={(item) => item.id}
+              style={{ maxHeight: height * 0.42 }}
+              ListEmptyComponent={<Text style={styles.pickerEmpty}>No contacts found.</Text>}
+              renderItem={({ item }) => {
+                const selected = selectedIds.includes(item.id);
+                const name = item.displayName || item.username;
+                return (
+                  <TouchableOpacity style={styles.pickerRow} onPress={() => toggleSelect(item.id)}>
+                    {item.avatarUrl ? (
+                      <Image source={{ uri: item.avatarUrl }} style={styles.pickerAvatar} />
+                    ) : (
+                      <View style={[styles.pickerAvatarFb, { backgroundColor: getAvatarColor(name) }]}>
+                        <Text style={styles.pickerAvatarFbText}>{getInitials(name)}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.pickerName}>{name}</Text>
+                    <Ionicons
+                      name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={24}
+                      color={selected ? '#0df' : '#475569'}
+                    />
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            <View style={styles.pickerActions}>
+              <TouchableOpacity style={styles.pickerCancel} onPress={() => { setShowMeeting(false); setSelectedIds([]); }}>
+                <Text style={styles.pickerCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pickerStart, selectedIds.length === 0 && { opacity: 0.4 }]}
+                onPress={handleStartMeeting}
+                disabled={selectedIds.length === 0}
+              >
+                <Ionicons name="videocam" size={18} color="#090d16" style={{ marginRight: 6 }} />
+                <Text style={styles.pickerStartText}>Start Meeting</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -526,5 +629,159 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 6,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0df',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 30,
+    shadowColor: '#0df',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  fabText: {
+    color: '#090d16',
+    fontWeight: '800',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: '#0f172a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 30,
+    borderTopWidth: 1,
+    borderColor: 'rgba(0,221,255,0.2)',
+  },
+  pickerHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#334155',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  pickerTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  pickerSub: {
+    color: '#64748b',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  typeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  typeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  typeBtnActive: {
+    backgroundColor: '#0df',
+    borderColor: '#0df',
+  },
+  typeBtnText: {
+    color: '#cbd5e1',
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  typeBtnTextActive: {
+    color: '#090d16',
+  },
+  pickerEmpty: {
+    color: '#475569',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  pickerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  pickerAvatarFb: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerAvatarFbText: {
+    color: '#090d16',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  pickerName: {
+    flex: 1,
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  pickerActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  pickerCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+  },
+  pickerCancelText: {
+    color: '#cbd5e1',
+    fontWeight: '700',
+  },
+  pickerStart: {
+    flex: 2,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#0df',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerStartText: {
+    color: '#090d16',
+    fontWeight: '800',
+    fontSize: 15,
   },
 });

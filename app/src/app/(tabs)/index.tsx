@@ -6,6 +6,8 @@ import { useRouter, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 
+import DocumentLocker from '../../components/DocumentLocker';
+
 const { width } = Dimensions.get('window');
 
 interface VaultItem {
@@ -459,11 +461,14 @@ export default function BentoDashboardScreen() {
         </View>
       </Modal>
 
+      {/* On-device, PIN-protected Document Locker (private to this phone) */}
+      <DocumentLocker visible={showVaultModal} onClose={() => setShowVaultModal(false)} />
+
       {/* --- MODAL 2: VAULT PIN LOCKER DIALOG MODAL (Kotlin Bento Replica) --- */}
       <Modal
         animationType="fade"
         transparent={true}
-        visible={showVaultModal}
+        visible={false}
         onRequestClose={() => {
           setIsVaultUnlocked(false);
           setShowVaultModal(false);

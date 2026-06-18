@@ -1,0 +1,23 @@
+# Render Blueprint — deploys the NOVA chat server (24/7, free tier).
+# In Render: New → Blueprint → connect this GitLab repo → it reads this file.
+# After deploy, set the secret env vars (MONGODB_URI, EMAIL_*) in the dashboard.
+services:
+  - type: web
+    name: nova-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: MONGODB_URI
+        sync: false   # paste your MongoDB Atlas connection string in the dashboard
+      - key: JWT_SECRET
+        generateValue: true   # Render auto-generates a strong secret
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
