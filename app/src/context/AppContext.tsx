@@ -1461,6 +1461,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Call Sound Player (Ringtone / Dialtone) Effect
   useEffect(() => {
+    let autoEndTimer: any = null;
     if (callState === 'ringing') {
       if (incomingCall) {
         // We are receiving the call (Receiver B) -> Play Ringtone + vibrate the phone.
@@ -1472,6 +1473,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // We are making the call (Caller A) -> Play Dialing tone
         playCallSound('dialing');
       }
+
+      // Auto end an unanswered call after 30 seconds: the receiver auto-rejects
+      // (becomes a missed call) and the caller's dialing auto-cancels.
+      autoEndTimer = setTimeout(() => {
+        const inc = incomingCallRef.current;
+        const out = activeCallRef.current;
+        if (inc?._id) {
+          rejectCall(inc._id);
+        } else if (out?._id) {
+          endCall(out._id, 0);
+        }
+      }, 30000);
     } else {
       // Not ringing anymore -> Stop any playing sound and vibration
       Vibration.cancel();
@@ -1479,6 +1492,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return () => {
+      if (autoEndTimer) clearTimeout(autoEndTimer);
       Vibration.cancel();
       stopCallSound();
     };

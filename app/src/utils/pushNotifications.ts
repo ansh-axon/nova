@@ -3,12 +3,15 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-// Foreground behaviour: still show a heads-up banner + play sound while the app
-// is open (Android shows it in the tray; iOS shows the banner).
+// Foreground behaviour: when the app is OPEN, the in-app call/message UI and
+// tones already handle alerts, so we suppress the push banner + sound to avoid
+// a double-ring (the push "calls" sound is ~18s and can't be stopped mid-way,
+// which made it keep ringing even after a call was cut). When the app is in the
+// background/closed this handler is NOT used — the OS plays the channel sound.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
+    shouldShowAlert: false,
+    shouldPlaySound: false,
     shouldSetBadge: false,
   }),
 });
