@@ -354,6 +354,13 @@ app.use('/api/calls', require('./routes/calls'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/locker', require('./routes/locker'));
 
+// Lightweight keep-alive endpoint. An external free uptime monitor (e.g.
+// UptimeRobot / cron-job.org) hits this every ~10 minutes so the free-tier
+// server never spins down — avoiding the 30-50s cold-start delays.
+app.get('/ping', (req, res) => {
+  res.status(200).json({ ok: true, ts: Date.now() });
+});
+
 // Simple index status route
 app.get('/', (req, res) => {
   res.json({ 
