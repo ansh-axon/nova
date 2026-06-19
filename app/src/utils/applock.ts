@@ -66,12 +66,15 @@ export async function authenticateBiometric(prompt = 'Unlock NOVA'): Promise<boo
     const available = await isBiometricAvailable();
     if (!available) return false;
 
+    // IMPORTANT (Android): a custom negative/cancel button and the OS device-credential
+    // fallback are MUTUALLY EXCLUSIVE — enabling both throws IllegalArgumentException
+    // and crashes the app. Since NOVA shows its own PIN keypad, we disable the device
+    // credential fallback and keep just our cancel button. Do NOT set fallbackLabel here
+    // (that only applies when device fallback is enabled).
     const res = await LocalAuthentication.authenticateAsync({
       promptMessage: prompt,
-      fallbackLabel: 'Use PIN',
-      // Keep the OS device-credential fallback enabled; disabling it caused
-      // crashes/instability on some Android devices. We still show our PIN UI.
-      cancelLabel: 'Cancel',
+      cancelLabel: 'Use PIN',
+      disableDeviceFallback: true,
     });
     return !!res.success;
   } catch {
