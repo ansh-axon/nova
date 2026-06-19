@@ -25,12 +25,12 @@ const fullIcon = (size) => `
   </defs>
   <rect width="512" height="512" fill="url(#bg)"/>
   <g filter="url(#glow)" fill="url(#star)">
-    <path d="M256 86 l36 134 134 36 -134 36 -36 134 -36 -134 -134 -36 134 -36 z"/>
+    <path d="M256 123 l28 105 105 28 -105 28 -28 105 -28 -105 -105 -28 105 -28 z"/>
   </g>
-  <circle cx="388" cy="146" r="7" fill="#aef6ff"/>
-  <circle cx="124" cy="372" r="5" fill="#7dd3fc"/>
-  <circle cx="404" cy="386" r="4" fill="#67e8f9"/>
-  <circle cx="120" cy="150" r="3.5" fill="#67e8f9"/>
+  <circle cx="388" cy="150" r="6" fill="#aef6ff"/>
+  <circle cx="128" cy="372" r="4.5" fill="#7dd3fc"/>
+  <circle cx="396" cy="384" r="3.5" fill="#67e8f9"/>
+  <circle cx="124" cy="152" r="3" fill="#67e8f9"/>
 </svg>`;
 
 // Foreground only (transparent bg, star sized within the adaptive-icon safe zone ~66%)
@@ -45,7 +45,7 @@ const foreground = (size) => `
     </filter>
   </defs>
   <g filter="url(#glow)" fill="url(#star)">
-    <path d="M256 130 l30 110 110 30 -110 30 -30 110 -30 -110 -110 -30 110 -30 z"/>
+    <path d="M256 164 l24 68 68 24 -68 24 -24 68 -24 -68 -68 -24 68 -24 z"/>
   </g>
 </svg>`;
 
@@ -53,7 +53,7 @@ const foreground = (size) => `
 const monochrome = (size) => `
 <svg width="${size}" height="${size}" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <g fill="#ffffff">
-    <path d="M256 130 l30 110 110 30 -110 30 -30 110 -30 -110 -110 -30 110 -30 z"/>
+    <path d="M256 164 l24 68 68 24 -68 24 -24 68 -24 -68 -68 -24 68 -24 z"/>
   </g>
 </svg>`;
 
@@ -77,7 +77,7 @@ const splash = (size) => `
     </linearGradient>
   </defs>
   <g fill="url(#star)">
-    <path d="M256 96 l34 126 126 34 -126 34 -34 126 -34 -126 -126 -34 126 -34 z"/>
+    <path d="M256 140 l26 90 90 26 -90 26 -26 90 -26 -90 -90 -26 90 -26 z"/>
   </g>
 </svg>`;
 

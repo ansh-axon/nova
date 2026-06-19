@@ -6,13 +6,15 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "app",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#090d16",
     "ios": {
       "icon": "./assets/images/icon.png",
       "bitcode": false
     },
     "android": {
       "package": "com.rahulverma.nova",
+      "backgroundColor": "#090d16",
       "adaptiveIcon": {
         "backgroundImage": "./assets/images/android-icon-background.png",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -39,10 +41,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#090d16",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120,
           "android": {
+            "backgroundColor": "#090d16",
             "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "imageWidth": 120
           }
         }
       ],

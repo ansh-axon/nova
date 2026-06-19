@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { showNeonAlert } from '../../components/NeonAlert';
 import { useApp } from '../../context/AppContext';
@@ -166,7 +166,18 @@ export default function SettingsScreen() {
 
   // ── Custom tone selection (call ringtone / message tone / group tone) ──
   const [previewSound, setPreviewSound] = useState<Audio.Sound | null>(null);
+  const [previewingUri, setPreviewingUri] = useState<string | null>(null);
   const [busyTone, setBusyTone] = useState<string | null>(null);
+
+  // Stop & release any preview sound when leaving the screen.
+  useEffect(() => {
+    return () => {
+      if (previewSound) {
+        previewSound.stopAsync().catch(() => {});
+        previewSound.unloadAsync().catch(() => {});
+      }
+    };
+  }, [previewSound]);
 
   const TONES_DIR = FileSystem.documentDirectory + 'tones/';
 
@@ -208,23 +219,42 @@ export default function SettingsScreen() {
     }
   };
 
+  const stopPreview = async () => {
+    if (previewSound) {
+      try { await previewSound.stopAsync(); } catch (e) {}
+      try { await previewSound.unloadAsync(); } catch (e) {}
+    }
+    setPreviewSound(null);
+    setPreviewingUri(null);
+  };
+
+  // Toggle preview: tapping the same tone again stops it (one play/stop button).
   const handlePreviewTone = async (uri: string) => {
+    if (previewingUri === uri) {
+      await stopPreview();
+      return;
+    }
+    await stopPreview();
     try {
-      if (previewSound) {
-        try { await previewSound.unloadAsync(); } catch (e) {}
-        setPreviewSound(null);
-      }
       const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: 1.0 });
       setPreviewSound(sound);
+      setPreviewingUri(uri);
       sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.didJustFinish) { sound.unloadAsync().catch(() => {}); setPreviewSound(null); }
+        if (status.didJustFinish) {
+          sound.unloadAsync().catch(() => {});
+          setPreviewSound(null);
+          setPreviewingUri(null);
+        }
       });
     } catch (e) {
+      setPreviewingUri(null);
       showNeonAlert({ title: 'PREVIEW FAILED', message: 'Could not play this tone.', icon: 'alert-circle-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
     }
   };
 
   const handleClearTone = async (kind: 'call' | 'message' | 'group') => {
+    const tone = customTones[kind];
+    if (tone && previewingUri === tone.uri) await stopPreview();
     await setCustomTone(kind, null);
   };
 
@@ -364,7 +394,7 @@ export default function SettingsScreen() {
                   </View>
                   {tone && (
                     <TouchableOpacity style={styles.toneIconBtn} onPress={() => handlePreviewTone(tone.uri)}>
-                      <Ionicons name="play" size={15} color="#10b981" />
+                      <Ionicons name={previewingUri === tone.uri ? 'stop' : 'play'} size={15} color={previewingUri === tone.uri ? '#f43f5e' : '#10b981'} />
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity style={styles.toneIconBtn} onPress={() => handlePickTone(kind)} disabled={busyTone === kind}>
