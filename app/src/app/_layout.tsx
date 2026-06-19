@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import GroupCallHost from '../components/GroupCallHost';
+import UnlockScreen from '../components/UnlockScreen';
 
 const { width } = Dimensions.get('window');
 
@@ -480,8 +481,25 @@ export default function RootLayout() {
         <NeonAlertHost />
         <GlobalCallHost />
         <GroupCallHost />
+        <AppLockGate />
       </AppProvider>
     </GestureHandlerRootView>
+  );
+}
+
+// Full-screen lock gate shown over everything when App Lock is enabled and the
+// app is currently locked (fresh launch or returning from background).
+function AppLockGate() {
+  const { appLockEnabled, appLocked, setAppLocked } = useApp();
+  if (!appLockEnabled || !appLocked) return null;
+  return (
+    <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]}>
+      <UnlockScreen
+        title="NOVA is Locked"
+        subtitle="Unlock with fingerprint or PIN"
+        onUnlock={() => setAppLocked(false)}
+      />
+    </View>
   );
 }
 

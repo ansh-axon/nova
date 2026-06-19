@@ -1,10 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Vibration } from 'react-native';
+import { Vibration, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io, Socket } from 'socket.io-client';
 import { showNeonAlert } from '../components/NeonAlert';
 import { getIceServers, getIceServersSync } from '../utils/iceConfig';
 import { getToken, setToken as secureSetToken, deleteToken } from '../utils/tokenStore';
+import {
+  isAppLockEnabled as alIsEnabled,
+  setAppLockEnabled as alSetEnabled,
+  getLockedChats as alGetLockedChats,
+  setLockedChats as alSetLockedChats,
+} from '../utils/applock';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -119,6 +125,14 @@ interface AppContextType {
   customTones: { call: ToneRef | null; message: ToneRef | null; group: ToneRef | null };
   setCustomTone: (kind: 'call' | 'message' | 'group', tone: ToneRef | null) => Promise<void>;
   playMessageTone: (isGroup: boolean) => void;
+  // App lock + hidden (locked) chats
+  appLockEnabled: boolean;
+  appLocked: boolean;
+  lockedChatIds: string[];
+  setAppLocked: (v: boolean) => void;
+  toggleAppLock: (enabled: boolean) => Promise<void>;
+  lockChat: (id: string) => Promise<void>;
+  unlockChat: (id: string) => Promise<void>;
   privacyLastSeen: boolean;
   privacyReadReceipts: boolean;
   setChatWallpaper: (val: string | null) => Promise<void>;
@@ -227,6 +241,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { customTonesRef.current = customTones; }, [customTones]);
   const conversationsRef = useRef<Conversation[]>([]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+
+  // App lock + hidden chats state
+  const [appLockEnabled, setAppLockEnabledState] = useState(false);
+  const [appLocked, setAppLocked] = useState(false);
+  const [lockedChatIds, setLockedChatIds] = useState<string[]>([]);
   const [privacyLastSeen, setPrivacyLastSeenState] = useState<boolean>(true);
   const [privacyReadReceipts, setPrivacyReadReceiptsState] = useState<boolean>(true);
 
@@ -924,6 +943,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } catch (e) {
           console.warn('Failed to load custom tones:', e);
+        }
+
+        // Restore app-lock + locked-chats state
+        try {
+          const [enabled, locked] = await Promise.all([alIsEnabled(), alGetLockedChats()]);
+          setAppLockEnabledState(enabled);
+          setLockedChatIds(locked);
+          // If app lock is on, start locked so the gate shows on launch.
+          if (enabled) setAppLocked(true);
+        } catch (e) {
+          console.warn('Failed to load app lock state:', e);
         }
 
         const storedLastSeen = await AsyncStorage.getItem('privacyLastSeen');
@@ -2067,6 +2097,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // ── App lock + hidden chats ──
+  const toggleAppLock = async (enabled: boolean) => {
+    setAppLockEnabledState(enabled);
+    await alSetEnabled(enabled);
+    // Don't lock immediately when turning ON (user is already in); it engages
+    // on next background→foreground. Turning OFF clears any active lock.
+    if (!enabled) setAppLocked(false);
+  };
+
+  const lockChat = async (id: string) => {
+    setLockedChatIds((prev) => {
+      const next = Array.from(new Set([...prev, id]));
+      alSetLockedChats(next);
+      return next;
+    });
+  };
+
+  const unlockChat = async (id: string) => {
+    setLockedChatIds((prev) => {
+      const next = prev.filter((x) => x !== id);
+      alSetLockedChats(next);
+      return next;
+    });
+  };
+
+  // Re-lock the app whenever it goes to the background (if App Lock is on).
+  const appLockEnabledRef = useRef(appLockEnabled);
+  useEffect(() => { appLockEnabledRef.current = appLockEnabled; }, [appLockEnabled]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if ((state === 'background' || state === 'inactive') && appLockEnabledRef.current) {
+        setAppLocked(true);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   const setPrivacyLastSeen = async (val: boolean) => {
     setPrivacyLastSeenState(val);
     await AsyncStorage.setItem('privacyLastSeen', val ? 'true' : 'false');
@@ -2120,6 +2187,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         customTones,
         setCustomTone,
         playMessageTone,
+        appLockEnabled,
+        appLocked,
+        lockedChatIds,
+        setAppLocked,
+        toggleAppLock,
+        lockChat,
+        unlockChat,
         privacyLastSeen,
         privacyReadReceipts,
         setChatWallpaper,

@@ -68,6 +68,12 @@
           "cameraPermission": "Allow NOVA to access camera for real-time video calls.",
           "microphonePermission": "Allow NOVA to access microphone for secure voice calls."
         }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow NOVA to use Face ID / biometrics to unlock the app and locked chats."
+        }
       ]
     ],
     "experiments": {

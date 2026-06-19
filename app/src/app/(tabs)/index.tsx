@@ -7,6 +7,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 
 import DocumentLocker from '../../components/DocumentLocker';
+import UnlockScreen from '../../components/UnlockScreen';
+import SetSecurityPinModal from '../../components/SetSecurityPinModal';
+import { hasSecurityPin } from '../../utils/applock';
 
 const { width } = Dimensions.get('window');
 
@@ -18,10 +21,14 @@ interface VaultItem {
 }
 
 export default function BentoDashboardScreen() {
-  const { conversations, users, fetchConversations, fetchUsers, startConversation, user, loading, logout } = useApp();
+  const { conversations, users, fetchConversations, fetchUsers, startConversation, user, loading, logout, lockedChatIds, lockChat, unlockChat } = useApp();
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [startingChat, setStartingChat] = useState(false);
+  const [showLockedChats, setShowLockedChats] = useState(false);
+  const [lockedUnlocked, setLockedUnlocked] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pendingLockId, setPendingLockId] = useState<string | null>(null);
   const router = useRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
@@ -113,6 +120,55 @@ export default function BentoDashboardScreen() {
     if (conversationId) {
       router.push(`/chat/${conversationId}`);
     }
+  };
+
+  // Conversations split into normal vs locked (hidden) lists.
+  const visibleConversations = conversations.filter((c) => !lockedChatIds.includes(c._id));
+  const lockedConversations = conversations.filter((c) => lockedChatIds.includes(c._id));
+
+  const handleChatLongPress = (item: Conversation) => {
+    const isLocked = lockedChatIds.includes(item._id);
+    const other = item.participants.find((p) => p.id !== user?.id) || item.participants[0];
+    const name = other?.displayName || 'this chat';
+    showNeonAlert({
+      title: isLocked ? 'UNLOCK CHAT' : 'LOCK CHAT',
+      message: isLocked
+        ? `Move "${name}" back to your normal chat list?`
+        : `Hide "${name}" behind your fingerprint / PIN? It will only appear inside Locked Chats.`,
+      icon: isLocked ? 'lock-open-outline' : 'lock-closed-outline',
+      iconColor: '#0df',
+      borderColor: '#0df',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isLocked ? 'Unlock' : 'Lock',
+          onPress: async () => {
+            if (isLocked) { unlockChat(item._id); return; }
+            const has = await hasSecurityPin();
+            if (has) {
+              lockChat(item._id);
+            } else {
+              // Need a security PIN before any chat can be locked.
+              setPendingLockId(item._id);
+              setShowPinSetup(true);
+            }
+          },
+        },
+      ],
+    });
+  };
+
+  const onPinSetupDone = (success: boolean) => {
+    setShowPinSetup(false);
+    if (success && pendingLockId) {
+      lockChat(pendingLockId);
+    }
+    setPendingLockId(null);
+  };
+
+  const openLockedChats = () => {
+    setLockedUnlocked(false);
+    setShowLockedChats(true);
   };
 
   const handleStartMetaAI = async () => {
@@ -296,20 +352,17 @@ export default function BentoDashboardScreen() {
               </View>
             </TouchableOpacity>
 
-            {/* Vault Attachment Locker Card */}
+            {/* Locked (hidden) Chats Card — opens behind fingerprint / PIN */}
             <TouchableOpacity 
-              style={[styles.bentoSmallCard, { backgroundColor: 'rgba(14, 165, 233, 0.1)' }]}
-              onPress={() => {
-                setIsVaultUnlocked(false);
-                setPinInput('');
-                setVaultErrorMessage(null);
-                setShowVaultModal(true);
-              }}
+              style={[styles.bentoSmallCard, { backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}
+              onPress={openLockedChats}
             >
-              <Ionicons name="attach" size={20} color="#0ea5e9" style={styles.bentoCardIcon} />
+              <Ionicons name="lock-closed" size={20} color="#a78bfa" style={styles.bentoCardIcon} />
               <View>
-                <Text style={[styles.bentoSmallCardTitle, { color: '#0ea5e9' }]}>Vault</Text>
-                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(14, 165, 233, 0.7)' }]}>142 Shared Docs</Text>
+                <Text style={[styles.bentoSmallCardTitle, { color: '#a78bfa' }]}>Locked Chats</Text>
+                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(167, 139, 250, 0.7)' }]}>
+                  {lockedConversations.length} hidden
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -319,7 +372,7 @@ export default function BentoDashboardScreen() {
         <Text style={styles.sectionHeader}>Direct Secure Channels</Text>
 
         {/* Conversations List */}
-        {conversations.length === 0 ? (
+        {visibleConversations.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={48} color="#334155" />
             <Text style={styles.emptyText}>No chats active yet.</Text>
@@ -327,7 +380,7 @@ export default function BentoDashboardScreen() {
           </View>
         ) : (
           <View style={styles.chatsListWrapper}>
-            {conversations.map((item) => {
+            {visibleConversations.map((item) => {
               const otherParticipant = item.participants.find(p => p.id !== user?.id) || item.participants[0];
               if (!otherParticipant) return null;
 
@@ -339,6 +392,8 @@ export default function BentoDashboardScreen() {
                   key={item._id}
                   style={styles.chatCard}
                   onPress={() => router.push(`/chat/${item._id}`)}
+                  onLongPress={() => handleChatLongPress(item)}
+                  delayLongPress={350}
                 >
                   <View style={styles.avatarWrapper}>
                     {otherParticipant.avatarUrl ? (
@@ -467,6 +522,76 @@ export default function BentoDashboardScreen() {
 
       {/* On-device, PIN-protected Document Locker (private to this phone) */}
       <DocumentLocker visible={showVaultModal} onClose={() => setShowVaultModal(false)} />
+
+      {/* Locked (hidden) Chats — gated by fingerprint / PIN */}
+      <Modal
+        visible={showLockedChats}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => { setShowLockedChats(false); setLockedUnlocked(false); }}
+      >
+        {!lockedUnlocked ? (
+          <UnlockScreen
+            title="Locked Chats"
+            subtitle="Unlock to view hidden chats"
+            onUnlock={() => setLockedUnlocked(true)}
+            onCancel={() => { setShowLockedChats(false); setLockedUnlocked(false); }}
+          />
+        ) : (
+          <View style={styles.container}>
+            <View style={styles.lockedHeader}>
+              <Text style={styles.lockedTitle}>Locked Chats</Text>
+              <TouchableOpacity onPress={() => { setShowLockedChats(false); setLockedUnlocked(false); }}>
+                <Ionicons name="close" size={26} color="#cbd5e1" />
+              </TouchableOpacity>
+            </View>
+            {lockedConversations.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="lock-open-outline" size={48} color="#334155" />
+                <Text style={styles.emptyText}>No locked chats</Text>
+                <Text style={styles.emptySubtitle}>Long-press any chat, then choose Lock to hide it here.</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+                {lockedConversations.map((item) => {
+                  const other = item.participants.find((p) => p.id !== user?.id) || item.participants[0];
+                  if (!other) return null;
+                  return (
+                    <TouchableOpacity
+                      key={item._id}
+                      style={styles.chatCard}
+                      onPress={() => { setShowLockedChats(false); setLockedUnlocked(false); router.push(`/chat/${item._id}`); }}
+                      onLongPress={() => handleChatLongPress(item)}
+                      delayLongPress={350}
+                    >
+                      <View style={styles.avatarWrapper}>
+                        {other.avatarUrl ? (
+                          <Image source={{ uri: other.avatarUrl }} style={styles.avatar} />
+                        ) : (
+                          <View style={[styles.avatarFallback, { backgroundColor: getAvatarColor(other.displayName) }]}>
+                            <Text style={styles.avatarFallbackText}>{getInitials(other.displayName)}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.chatInfo}>
+                        <Text style={styles.participantName}>{other.displayName}</Text>
+                        <Text style={styles.lastMessageText} numberOfLines={1}>
+                          {item.lastMessage?.text || 'Tap to open'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity onPress={() => unlockChat(item._id)} style={{ padding: 8 }}>
+                        <Ionicons name="lock-open-outline" size={20} color="#a78bfa" />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        )}
+      </Modal>
+
+      <SetSecurityPinModal visible={showPinSetup} onDone={onPinSetupDone} />
 
       {/* --- MODAL 2: VAULT PIN LOCKER DIALOG MODAL (Kotlin Bento Replica) --- */}
       <Modal
@@ -711,6 +836,22 @@ export default function BentoDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  lockedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  lockedTitle: {
+    color: '#f8fafc',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   container: {
     flex: 1,
     backgroundColor: '#040810', // Pure premium OLED dark canvas matching Kotlin

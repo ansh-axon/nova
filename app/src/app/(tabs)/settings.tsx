@@ -7,13 +7,41 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
+import SetSecurityPinModal from '../../components/SetSecurityPinModal';
+import { hasSecurityPin, isBiometricAvailable } from '../../utils/applock';
 
 export default function SettingsScreen() {
-  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, customTones, setCustomTone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts } = useApp();
+  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, customTones, setCustomTone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts, appLockEnabled, toggleAppLock } = useApp();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [about, setAbout] = useState(user?.about || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
   const [updating, setUpdating] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [bioAvailable, setBioAvailable] = useState(false);
+
+  useEffect(() => { isBiometricAvailable().then(setBioAvailable); }, []);
+
+  const handleToggleAppLock = async (value: boolean) => {
+    if (value) {
+      const has = await hasSecurityPin();
+      if (has) {
+        await toggleAppLock(true);
+        showNeonAlert({ title: 'APP LOCK ON', message: 'NOVA will ask for fingerprint / PIN when you open it.', icon: 'lock-closed', iconColor: '#10b981', borderColor: '#10b981' });
+      } else {
+        setShowPinSetup(true); // need to create a PIN first
+      }
+    } else {
+      await toggleAppLock(false);
+    }
+  };
+
+  const onPinSetupDone = async (success: boolean) => {
+    setShowPinSetup(false);
+    if (success) {
+      await toggleAppLock(true);
+      showNeonAlert({ title: 'APP LOCK ON', message: 'PIN set. NOVA is now protected with App Lock.', icon: 'shield-checkmark', iconColor: '#10b981', borderColor: '#10b981' });
+    }
+  };
 
   const getInitials = (name: string) => {
     return name ? name.charAt(0).toUpperCase() : '?';
@@ -441,6 +469,28 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* App Security Section */}
+        <View style={styles.helpSection}>
+          <Text style={styles.sectionHeaderTitle}>App Security</Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingTitle}>App Lock</Text>
+              <Text style={styles.settingSubtitle}>
+                {bioAvailable ? 'Require fingerprint / PIN to open NOVA' : 'Require a PIN to open NOVA'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggleSwitch, appLockEnabled && styles.toggleSwitchActive]}
+              onPress={() => handleToggleAppLock(!appLockEnabled)}
+            >
+              <View style={[styles.toggleCircle, appLockEnabled && styles.toggleCircleActive]} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.toneHint}>
+            Tip: long-press any chat to lock it. Locked chats are hidden and open only with your fingerprint / PIN.
+          </Text>
+        </View>
+
         {/* Help & Support Section */}
         <View style={styles.helpSection}>
           <Text style={styles.sectionHeaderTitle}>Help & Support</Text>
@@ -476,6 +526,8 @@ export default function SettingsScreen() {
         {/* Created by footer */}
         <Text style={styles.creditText}>Created by Ansh Verma</Text>
       </View>
+
+      <SetSecurityPinModal visible={showPinSetup} onDone={onPinSetupDone} />
     </ScrollView>
   );
 }
