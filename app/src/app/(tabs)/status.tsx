@@ -5,6 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode } from 'expo-av';
+import { getCachedMedia, cacheMedia } from '../../utils/mediaCache';
 import { showNeonAlert } from '../../components/NeonAlert';
 
 const { width, height } = Dimensions.get('window');
@@ -19,6 +20,9 @@ export default function StatusScreen() {
   const [groupedStatuses, setGroupedStatuses] = useState<any[]>([]);
   const [showViewers, setShowViewers] = useState(false);
   const [videoBuffering, setVideoBuffering] = useState(false);
+  // Locally-cached video source for the current story (keyed by story id) so a
+  // video streams the first time, then plays from local cache on later views.
+  const [videoCache, setVideoCache] = useState<{ id: string; uri: string } | null>(null);
 
   // Text status creator states
   const [showTextModal, setShowTextModal] = useState(false);
@@ -126,6 +130,28 @@ export default function StatusScreen() {
 
     setGroupedStatuses(array);
   }, [statuses, user]);
+
+  // Resolve the best source for the current video story: use the local cached
+  // copy if we have it (smooth, instant), otherwise stream from the server the
+  // first time and cache it in the background for next time.
+  useEffect(() => {
+    const cur = selectedGroup?.stories?.[currentStoryIndex];
+    if (!cur || cur.statusType !== 'video' || !cur.mediaUrl) return;
+    const remote = cur.mediaUrl.startsWith('http') ? cur.mediaUrl : `${serverUrl}${cur.mediaUrl}`;
+    let active = true;
+    (async () => {
+      const cached = await getCachedMedia(remote);
+      if (!active) return;
+      if (cached) {
+        setVideoCache({ id: cur._id, uri: cached });
+      } else {
+        setVideoCache({ id: cur._id, uri: remote });
+        // Download in the background so the next view plays from local cache.
+        cacheMedia(remote).catch(() => {});
+      }
+    })();
+    return () => { active = false; };
+  }, [selectedGroup, currentStoryIndex, serverUrl]);
 
   // Story Auto-Progress Timer Animation (images/text only — videos are driven by
   // their own playback so they are NOT cut off at 5 seconds).
@@ -615,10 +641,14 @@ export default function StatusScreen() {
                 const mediaSourceUri = currentStory.mediaUrl.startsWith('http') 
                   ? currentStory.mediaUrl 
                   : `${serverUrl}${currentStory.mediaUrl}`;
+                // Prefer the locally-cached copy for this exact story when ready.
+                const videoSourceUri = (videoCache && videoCache.id === currentStory._id)
+                  ? videoCache.uri
+                  : mediaSourceUri;
                 return (
                   <View style={styles.imageViewerWrapper}>
                     <Video
-                      source={{ uri: mediaSourceUri }}
+                      source={{ uri: videoSourceUri }}
                       rate={1.0}
                       volume={1.0}
                       isMuted={false}
