@@ -1548,17 +1548,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
-      }, 8000);
+      }, 25000);
       const data = await response.json();
       if (!response.ok) {
         showNeonAlert({ title: 'REQUEST FAILED', message: data.message || 'Could not send reset code.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
         return false;
       }
-      showNeonAlert({ title: 'CHECK YOUR EMAIL', message: data.message || 'Reset code sent.', icon: 'mail-outline', borderColor: '#10b981', iconColor: '#10b981' });
+      showNeonAlert({ title: 'CHECK YOUR EMAIL', message: data.message || 'Reset code sent. Also check your Spam folder.', icon: 'mail-outline', borderColor: '#10b981', iconColor: '#10b981' });
       return true;
     } catch (err) {
       console.error(err);
-      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Failed to reach the server.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      showNeonAlert({ title: 'SERVER WAKING UP', message: 'The server may be starting up. Please tap Send again in a few seconds.', icon: 'time-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
       return false;
     }
   };
@@ -1570,7 +1570,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code, newPassword })
-      }, 8000);
+      }, 25000);
       const data = await response.json();
       if (!response.ok) {
         showNeonAlert({ title: 'RESET FAILED', message: data.message || 'Could not reset password.', icon: 'close-circle-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
@@ -1580,7 +1580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return true;
     } catch (err) {
       console.error(err);
-      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Failed to reach the server.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      showNeonAlert({ title: 'SERVER WAKING UP', message: 'The server may be starting up. Please tap again in a few seconds.', icon: 'time-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
       return false;
     }
   };
@@ -2159,13 +2159,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Re-lock the app whenever it goes to the background (if App Lock is on).
+  // Re-lock the app only after it has been in the background for a while.
+  // Opening the image/video picker, share sheet, or camera briefly sends the
+  // app to 'inactive'/'background'. Locking on every such event forced the user
+  // to re-enter the PIN constantly, so we use a grace period instead.
   const appLockEnabledRef = useRef(appLockEnabled);
   useEffect(() => { appLockEnabledRef.current = appLockEnabled; }, [appLockEnabled]);
+  const backgroundedAtRef = useRef<number>(0);
+  const RELOCK_GRACE_MS = 60000; // 60s: covers pickers, sharing, short recordings
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if ((state === 'background' || state === 'inactive') && appLockEnabledRef.current) {
-        setAppLocked(true);
+      if (!appLockEnabledRef.current) return;
+      if (state === 'background' || state === 'inactive') {
+        // Mark when we left; don't lock yet (pickers/share momentarily background us).
+        if (backgroundedAtRef.current === 0) backgroundedAtRef.current = Date.now();
+      } else if (state === 'active') {
+        const awayMs = backgroundedAtRef.current ? Date.now() - backgroundedAtRef.current : 0;
+        backgroundedAtRef.current = 0;
+        if (awayMs > RELOCK_GRACE_MS) setAppLocked(true);
       }
     });
     return () => sub.remove();

@@ -58,15 +58,22 @@ export async function isBiometricAvailable(): Promise<boolean> {
   }
 }
 
-/** Prompts the device biometric. Returns true on success. */
+/** Prompts the device biometric. Returns true on success. Never throws. */
 export async function authenticateBiometric(prompt = 'Unlock NOVA'): Promise<boolean> {
   try {
+    // Guard: only prompt when hardware exists AND a fingerprint/face is enrolled.
+    // Calling authenticateAsync without enrollment can crash on some devices.
+    const available = await isBiometricAvailable();
+    if (!available) return false;
+
     const res = await LocalAuthentication.authenticateAsync({
       promptMessage: prompt,
       fallbackLabel: 'Use PIN',
-      disableDeviceFallback: true, // we provide our own PIN fallback UI
+      // Keep the OS device-credential fallback enabled; disabling it caused
+      // crashes/instability on some Android devices. We still show our PIN UI.
+      cancelLabel: 'Cancel',
     });
-    return res.success;
+    return !!res.success;
   } catch {
     return false;
   }
