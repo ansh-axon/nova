@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, Camera } from 'expo-camera';
-import { Audio, Video, ResizeMode } from 'expo-av';
+import { Audio, Video, ResizeMode, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -503,10 +503,16 @@ export default function ChatScreen() {
         setRecording(null);
       }
 
+      // Configure a clean recording audio session. DO_NOT_MIX ensures we take
+      // exclusive control of the mic — important because react-native-webrtc
+      // (calls) can otherwise hold the audio session and block recording.
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
         shouldRouteThroughEarpieceAndroid: false,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
       });
 
       console.log('Starting audio recording...');
@@ -826,8 +832,13 @@ export default function ChatScreen() {
 
     const handlePlayPause = async () => {
       try {
-        // Ensure audio routes to the speaker for playback (not stuck in record mode)
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        // Ensure audio routes to the loudspeaker for playback (not stuck in the
+        // quiet earpiece, and not in record mode).
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          shouldRouteThroughEarpieceAndroid: false,
+        });
         if (!sound) return;
         if (isPlaying) {
           await sound.pauseAsync();
