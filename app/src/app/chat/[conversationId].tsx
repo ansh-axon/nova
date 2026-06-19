@@ -524,7 +524,7 @@ export default function ChatScreen() {
       recordStartRef.current = Date.now();
       setRecording(newRecording);
       setIsRecording(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to start recording:', err);
       // Make sure we don't leave a half-prepared recording around.
       recordingRef.current = null;
@@ -533,7 +533,7 @@ export default function ChatScreen() {
       try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch (e) {}
       showNeonAlert({
         title: 'RECORDING ERROR',
-        message: 'Could not start the microphone. Close any active call and try again.',
+        message: `Could not start the mic: ${err?.message || String(err)}`,
         icon: 'close-circle-outline',
         iconColor: '#f43f5e',
         borderColor: '#f43f5e',
@@ -839,20 +839,39 @@ export default function ChatScreen() {
           playsInSilentModeIOS: true,
           shouldRouteThroughEarpieceAndroid: false,
         });
-        if (!sound) return;
+
+        // If the sound failed to preload (e.g., it wasn't ready yet), load it now.
+        let snd = sound;
+        if (!snd) {
+          const created = await Audio.Sound.createAsync(
+            { uri },
+            { shouldPlay: true, progressUpdateIntervalMillis: 250 },
+            onStatus
+          );
+          snd = created.sound;
+          setSound(snd);
+          setIsPlaying(true);
+          return;
+        }
+
         if (isPlaying) {
-          await sound.pauseAsync();
+          await snd.pauseAsync();
           setIsPlaying(false);
         } else {
-          const st: any = await sound.getStatusAsync();
+          const st: any = await snd.getStatusAsync();
           if (st.isLoaded && st.didJustFinish) {
-            await sound.setPositionAsync(0);
+            await snd.setPositionAsync(0);
           }
-          await sound.playAsync();
+          await snd.playAsync();
           setIsPlaying(true);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Play audio error:', err);
+        showNeonAlert({
+          title: 'PLAYBACK ERROR',
+          message: `Could not play this voice note: ${err?.message || String(err)}`,
+          icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e',
+        });
       }
     };
 

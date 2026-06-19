@@ -174,7 +174,8 @@ router.post('/', auth, async (req, res) => {
         await sendPush(tokens, {
           title,
           body,
-          channelId: 'messages',
+          channelId: 'messages-v2',
+          sound: 'notif_message.wav',
           data: { type: 'message', conversationId: conversationId.toString() },
         });
       } catch (e) {

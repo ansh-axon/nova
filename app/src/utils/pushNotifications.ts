@@ -13,22 +13,29 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Android requires explicit notification channels. We make a high-importance
-// channel for messages and a max-importance one for calls.
+// Android requires explicit notification channels. We use NEW channel IDs (v2)
+// so devices that already created the old default-sound channels pick up our
+// custom NOVA sounds (Android never changes an existing channel's sound).
+export const MESSAGE_CHANNEL_ID = 'messages-v2';
+export const CALL_CHANNEL_ID = 'calls-v2';
+
 export async function ensureAndroidChannels() {
   if (Platform.OS !== 'android') return;
   try {
-    await Notifications.setNotificationChannelAsync('messages', {
+    await Notifications.setNotificationChannelAsync(MESSAGE_CHANNEL_ID, {
       name: 'Messages',
       importance: Notifications.AndroidImportance.HIGH,
+      sound: 'notif_message.wav',
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#00ddff',
     });
-    await Notifications.setNotificationChannelAsync('calls', {
+    await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
       name: 'Calls',
       importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 500, 500, 500],
+      sound: 'ring_call.wav',
+      vibrationPattern: [0, 1000, 800, 1000, 800, 1000, 800],
       lightColor: '#00ddff',
+      bypassDnd: true,
     });
   } catch (e) {
     console.warn('[PUSH] channel setup failed:', e);

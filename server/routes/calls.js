@@ -80,8 +80,9 @@ router.post('/initiate', auth, async (req, res) => {
           await sendPush(recipient.pushTokens, {
             title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
             body: `${callerName} is calling you on NOVA`,
-            channelId: 'calls',
+            channelId: 'calls-v2',
             priority: 'high',
+            sound: 'ring_call.wav',
             data: { type: 'call', callRoomId, callType, conversationId: conversationId || null },
           });
         }

@@ -131,4 +131,27 @@ function makeBuffer(seconds) {
   writeWav('aurora.wav', b);
 })();
 
+// ── Push notification sounds (bundled as Android channel sounds) ──
+
+// notif_message: short pleasant chime used for incoming-message push.
+(() => {
+  const b = makeBuffer(1.0);
+  addNote(b, 0.0, 0.45, N.E6, 0.7);
+  addNote(b, 0.22, 0.6, N.C6, 0.7);
+  writeWav('notif_message.wav', b);
+})();
+
+// ring_call: a longer (~18s) repeating ring for incoming-call push so it
+// behaves more like a phone ringtone while the app is closed.
+(() => {
+  const b = makeBuffer(18.0);
+  for (let r = 0; r < 18; r++) {
+    const o = r * 1.0;
+    addNote(b, o + 0.0, 0.28, N.A5, 0.7);
+    addNote(b, o + 0.18, 0.28, N.E6, 0.6);
+    addNote(b, o + 0.4, 0.28, N.A5, 0.6);
+  }
+  writeWav('ring_call.wav', b);
+})();
+
 console.log('Done. Tones in', OUT);
