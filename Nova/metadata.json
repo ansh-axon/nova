@@ -1,6 +1,0 @@
-{
-  "name": "NOVA",
-  "description": "An end-to-end encrypted private chat application based on WhatsApp with a 15-member group limit, featuring secure group & individual chats, call logs, media sharing, and realistic calling screen simulations.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
