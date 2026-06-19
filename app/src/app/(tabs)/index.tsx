@@ -21,7 +21,7 @@ interface VaultItem {
 }
 
 export default function BentoDashboardScreen() {
-  const { conversations, users, fetchConversations, fetchUsers, startConversation, createGroup, sendMessage, user, loading, logout, lockedChatIds, lockChat, unlockChat } = useApp();
+  const { conversations, users, fetchConversations, fetchUsers, startConversation, createGroup, sendMessage, user, loading, logout, lockedChatIds, lockChat, unlockChat, callHistory, fetchCallHistory } = useApp();
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [startingChat, setStartingChat] = useState(false);
@@ -111,8 +111,15 @@ export default function BentoDashboardScreen() {
     if (isFocused) {
       fetchConversations();
       fetchUsers();
+      fetchCallHistory();
     }
   }, [isFocused]);
+
+  // Real count of incoming calls that were missed or rejected (not placed by me).
+  const missedCallCount = (callHistory || []).filter((c: any) => {
+    const isCallerMe = c.caller?._id === user?.id || c.caller?.id === user?.id;
+    return !isCallerMe && (c.status === 'missed' || c.status === 'rejected');
+  }).length;
 
   const handleStartChat = async (recipientId: string) => {
     setStartingChat(true);
@@ -402,7 +409,9 @@ export default function BentoDashboardScreen() {
               <Ionicons name="call" size={20} color="#f59e0b" style={styles.bentoCardIcon} />
               <View>
                 <Text style={[styles.bentoSmallCardTitle, { color: '#f59e0b' }]}>Calls</Text>
-                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(245, 158, 11, 0.7)' }]}>3 Missed Logs</Text>
+                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(245, 158, 11, 0.7)' }]}>
+                  {missedCallCount > 0 ? `${missedCallCount} Missed Call${missedCallCount > 1 ? 's' : ''}` : 'No missed calls'}
+                </Text>
               </View>
             </TouchableOpacity>
 
