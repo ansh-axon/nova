@@ -32,14 +32,10 @@ export default function UnlockScreen({ title = 'NOVA Locked', subtitle = 'Unlock
   };
 
   useEffect(() => {
-    (async () => {
-      const avail = await isBiometricAvailable();
-      setBioAvailable(avail);
-      if (avail && autoBiometric && !triedRef.current) {
-        triedRef.current = true;
-        runBiometric();
-      }
-    })();
+    // Only detect availability. We do NOT auto-trigger the biometric prompt on
+    // mount — auto-calling it on screen open caused instability on some devices.
+    // The user taps the fingerprint button to use biometric.
+    isBiometricAvailable().then(setBioAvailable).catch(() => setBioAvailable(false));
   }, []);
 
   const handleKey = async (key: string) => {

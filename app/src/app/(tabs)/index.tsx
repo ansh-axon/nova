@@ -169,7 +169,9 @@ export default function BentoDashboardScreen() {
   };
 
   const openLockedChats = () => {
-    setLockedUnlocked(false);
+    // If there are no locked chats yet, there's nothing to protect — show the
+    // (empty) list directly instead of prompting to unlock.
+    setLockedUnlocked(lockedConversations.length === 0);
     setShowLockedChats(true);
   };
 
@@ -433,11 +435,14 @@ export default function BentoDashboardScreen() {
         ) : (
           <View style={styles.chatsListWrapper}>
             {visibleConversations.map((item) => {
+              const isGroup = !!item.isGroup;
               const otherParticipant = item.participants.find(p => p.id !== user?.id) || item.participants[0];
-              if (!otherParticipant) return null;
+              if (!isGroup && !otherParticipant) return null;
 
-              const isAI = otherParticipant.username === 'meta_ai';
-              const isOnline = otherParticipant.isOnline;
+              const isAI = !isGroup && otherParticipant?.username === 'meta_ai';
+              const isOnline = !isGroup && otherParticipant?.isOnline;
+              const title = isGroup ? (item.groupName || 'Group') : otherParticipant.displayName;
+              const avatarUrl = isGroup ? '' : otherParticipant.avatarUrl;
 
               return (
                 <TouchableOpacity
@@ -448,14 +453,18 @@ export default function BentoDashboardScreen() {
                   delayLongPress={350}
                 >
                   <View style={styles.avatarWrapper}>
-                    {otherParticipant.avatarUrl ? (
+                    {isGroup ? (
+                      <View style={[styles.avatarFallback, { backgroundColor: '#1e293b' }]}>
+                        <Ionicons name="people" size={26} color="#0df" />
+                      </View>
+                    ) : avatarUrl ? (
                       <Image
-                        source={{ uri: otherParticipant.avatarUrl }}
+                        source={{ uri: avatarUrl }}
                         style={styles.avatar}
                       />
                     ) : (
-                      <View style={[styles.avatarFallback, { backgroundColor: getAvatarColor(otherParticipant.displayName) }]}>
-                        <Text style={styles.avatarFallbackText}>{getInitials(otherParticipant.displayName)}</Text>
+                      <View style={[styles.avatarFallback, { backgroundColor: getAvatarColor(title) }]}>
+                        <Text style={styles.avatarFallbackText}>{getInitials(title)}</Text>
                       </View>
                     )}
                     {isOnline && !isAI && <View style={styles.onlineBadge} />}
@@ -465,7 +474,7 @@ export default function BentoDashboardScreen() {
                   <View style={styles.chatInfo}>
                     <View style={styles.chatHeader}>
                       <Text style={[styles.participantName, isAI && styles.aiName]}>
-                        {otherParticipant.displayName}
+                        {title}
                       </Text>
                       <Text style={styles.chatTime}>
                         {formatTime(item.lastMessage?.createdAt || item.updatedAt)}
@@ -488,7 +497,7 @@ export default function BentoDashboardScreen() {
                           </Text>
                         </View>
                       ) : (
-                        <Text style={styles.noMessageText}>No messages yet</Text>
+                        <Text style={styles.noMessageText}>{isGroup ? 'Group created · say hi 👋' : 'No messages yet'}</Text>
                       )}
                     </View>
                   </View>

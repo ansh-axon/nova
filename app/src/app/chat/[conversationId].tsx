@@ -1090,10 +1090,12 @@ export default function ChatScreen() {
 
           <View style={styles.headerTitleContainer}>
             <Text style={[styles.headerTitleText, isAI && styles.aiTitleText]}>
-              {otherParticipant?.displayName || 'User'}
+              {conversation?.isGroup ? (conversation.groupName || 'Group') : (otherParticipant?.displayName || 'User')}
             </Text>
             <Text style={styles.headerStatusText}>
-              {otherUserTyping
+              {conversation?.isGroup
+                ? `${conversation.participants?.length || 0} members`
+                : otherUserTyping
                 ? 'typing...'
                 : isAI
                 ? 'Nova AI Bot 🤖'
