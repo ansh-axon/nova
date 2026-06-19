@@ -352,6 +352,7 @@ app.use('/api/messages', require('./routes/messages'));
 app.use('/api/status', require('./routes/status'));
 app.use('/api/calls', require('./routes/calls'));
 app.use('/api/upload', require('./routes/upload'));
+app.use('/api/locker', require('./routes/locker'));
 
 // Simple index status route
 app.get('/', (req, res) => {

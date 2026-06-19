@@ -23,3 +23,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false   # Google Gemini API key for the in-app NOVA AI assistant
+      - key: LOCKER_SECRET
+        sync: false   # 32-byte base64 key encrypting document-locker files at rest

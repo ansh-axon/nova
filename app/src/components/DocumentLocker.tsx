@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { showNeonAlert } from './NeonAlert';
-import { hasPin, setPin, verifyPin, listItems, addItem, removeItem, formatSize, LockerItem } from '../utils/locker';
+import { hasPin, setPin, verifyPin, listItems, addItem, removeItem, ensureLocalFile, formatSize, LockerItem } from '../utils/locker';
 
 type Stage = 'loading' | 'setup' | 'unlock' | 'browse';
 const PIN_LENGTH = 4;
@@ -138,13 +138,22 @@ export default function DocumentLocker({ visible, onClose }: { visible: boolean;
 
   const handleOpen = async (item: LockerItem) => {
     try {
+      setBusy(true);
+      // Make sure the file is available locally (download from the vault if the
+      // local copy is missing — e.g. after a reinstall or on a new device).
+      const localUri = await ensureLocalFile(item);
       const can = await Sharing.isAvailableAsync();
       if (!can) {
         showNeonAlert({ title: 'PREVIEW UNAVAILABLE', message: 'Sharing is not available on this device.', icon: 'alert-circle-outline', borderColor: '#f59e0b', iconColor: '#f59e0b' });
         return;
       }
-      await Sharing.shareAsync(item.uri, { mimeType: item.mimeType, dialogTitle: item.name });
-    } catch (e) { console.error('Locker open error:', e); }
+      await Sharing.shareAsync(localUri, { mimeType: item.mimeType, dialogTitle: item.name });
+    } catch (e) {
+      console.error('Locker open error:', e);
+      showNeonAlert({ title: 'COULD NOT OPEN', message: 'Failed to retrieve this file. Check your connection and try again.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleDelete = (item: LockerItem) => {
@@ -169,7 +178,7 @@ export default function DocumentLocker({ visible, onClose }: { visible: boolean;
     <View style={styles.padWrap}>
       <Text style={styles.padTitle}>{titleLabel}</Text>
       <Text style={styles.padSub}>
-        {isSetupStage && firstPinRef.current ? 'Re-enter the same PIN to confirm.' : 'Files are sealed privately on this device only.'}
+        {isSetupStage && firstPinRef.current ? 'Re-enter the same PIN to confirm.' : 'Files are encrypted & safely backed up to your account.'}
       </Text>
 
       <View style={styles.dotsRow}>
@@ -213,13 +222,13 @@ export default function DocumentLocker({ visible, onClose }: { visible: boolean;
 
   const renderBrowse = () => (
     <View style={styles.browseWrap}>
-      <Text style={styles.browseSub}>{items.length} private file{items.length === 1 ? '' : 's'} · stored only on this device</Text>
+      <Text style={styles.browseSub}>{items.length} private file{items.length === 1 ? '' : 's'} · encrypted & backed up to your account</Text>
       <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 8 }}>
         {items.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="folder-open-outline" size={48} color="#1e293b" />
             <Text style={styles.emptyText}>Locker is empty</Text>
-            <Text style={styles.emptySub}>Tap "Add File" to securely store any document, photo or video.</Text>
+            <Text style={styles.emptySub}>Tap "Add File" to securely store any document, photo or video. It stays safe even if you delete it from your phone.</Text>
           </View>
         ) : items.map((item) => (
           <View key={item.id} style={styles.row}>
