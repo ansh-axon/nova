@@ -787,11 +787,25 @@ export default function ChatScreen() {
   };
 
   // SUB-COMPONENT: CYBER AUDIOWAVE MEMO BUBBLE
+  // Voice notes are streamed from the server, but the free-tier server can be
+  // asleep/slow, which made ExoPlayer time out (10s) on play. So we DOWNLOAD the
+  // file to a local cache first (longer, retryable), then play locally — smooth
+  // and instant, with no re-streaming.
   const AudioMemoBubble = ({ uri }: { uri: string }) => {
+    const isLocalUri = uri.startsWith('file://');
     const [isPlaying, setIsPlaying] = useState(false);
     const [sound, setSound] = useState<Audio.Sound | null>(null);
     const [duration, setDuration] = useState(0);
     const [position, setPosition] = useState(0);
+    const [localUri, setLocalUri] = useState<string | null>(isLocalUri ? uri : null);
+    const [downloading, setDownloading] = useState(false);
+    const [preparing, setPreparing] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const busyRef = useRef(false); // guards against rapid multi-taps
+
+    const cacheDir = FileSystem.cacheDirectory + 'nova_voicenotes/';
+    const safeName = (uri.split('?')[0].split('/').pop() || `vn_${Date.now()}.m4a`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const cachePath = cacheDir + safeName;
 
     const onStatus = (status: any) => {
       if (status.isLoaded) {
@@ -805,54 +819,98 @@ export default function ChatScreen() {
       }
     };
 
-    // Load the audio on mount so its duration shows BEFORE playing (like WhatsApp).
+    // Load a sound object from a LOCAL file path so duration shows and playback
+    // is instant. Returns the created sound (or null on failure).
+    const loadLocalSound = async (path: string): Promise<Audio.Sound | null> => {
+      try {
+        const { sound: s, status } = await Audio.Sound.createAsync(
+          { uri: path },
+          { shouldPlay: false, progressUpdateIntervalMillis: 250 },
+          onStatus
+        );
+        if (status.isLoaded && status.durationMillis) setDuration(status.durationMillis);
+        return s;
+      } catch (e) {
+        console.log('Local sound load error:', e);
+        return null;
+      }
+    };
+
+    // On mount: if already cached (or already a local file), prepare the sound.
     useEffect(() => {
       let mounted = true;
-      let localSound: Audio.Sound | null = null;
+      let created: Audio.Sound | null = null;
       (async () => {
         try {
-          const { sound: s, status } = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: false, progressUpdateIntervalMillis: 250 },
-            onStatus
-          );
-          localSound = s;
-          if (!mounted) { await s.unloadAsync(); return; }
-          if (status.isLoaded && status.durationMillis) setDuration(status.durationMillis);
-          setSound(s);
-        } catch (err) {
-          console.log('Audio preload error:', err);
+          let path: string | null = null;
+          if (isLocalUri) {
+            path = uri;
+          } else {
+            const info = await FileSystem.getInfoAsync(cachePath);
+            if (info.exists) path = cachePath;
+          }
+          if (!path) return; // not downloaded yet → user taps Download
+          if (!mounted) return;
+          setLocalUri(path);
+          const s = await loadLocalSound(path);
+          created = s;
+          if (!mounted) { if (s) await s.unloadAsync(); return; }
+          if (s) setSound(s);
+        } catch (e) {
+          console.log('Voice note mount error:', e);
         }
       })();
       return () => {
         mounted = false;
-        if (localSound) localSound.unloadAsync();
+        if (created) created.unloadAsync().catch(() => {});
       };
     }, [uri]);
 
-    const handlePlayPause = async () => {
+    // Download the remote voice note into the local cache, then prepare it.
+    const downloadVoiceNote = async () => {
+      if (busyRef.current || downloading) return;
+      busyRef.current = true;
+      setDownloading(true);
+      setFailed(false);
       try {
-        // Ensure audio routes to the loudspeaker for playback (not stuck in the
-        // quiet earpiece, and not in record mode).
+        const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+        if (!dirInfo.exists) await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+        const res = await FileSystem.downloadAsync(uri, cachePath);
+        if (!res || (res.status && res.status >= 400)) throw new Error(`Download failed (status ${res?.status})`);
+        setLocalUri(cachePath);
+        const s = await loadLocalSound(cachePath);
+        if (s) setSound(s);
+      } catch (e: any) {
+        console.error('Voice note download error:', e);
+        setFailed(true);
+        showNeonAlert({
+          title: 'DOWNLOAD FAILED',
+          message: 'Could not download the voice note. The server may be waking up — please try again in a few seconds.',
+          icon: 'cloud-offline-outline', iconColor: '#f59e0b', borderColor: '#f59e0b',
+        });
+      } finally {
+        setDownloading(false);
+        busyRef.current = false;
+      }
+    };
+
+    const handlePlayPause = async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      try {
+        // Route playback to the loudspeaker (not earpiece / record mode).
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           playsInSilentModeIOS: true,
           shouldRouteThroughEarpieceAndroid: false,
         });
 
-        // If the sound failed to preload (e.g., it wasn't ready yet), load it now.
         let snd = sound;
-        if (!snd) {
-          const created = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: true, progressUpdateIntervalMillis: 250 },
-            onStatus
-          );
-          snd = created.sound;
-          setSound(snd);
-          setIsPlaying(true);
-          return;
+        if (!snd && localUri) {
+          snd = await loadLocalSound(localUri);
+          if (snd) setSound(snd);
         }
+        if (!snd) return;
 
         if (isPlaying) {
           await snd.pauseAsync();
@@ -872,6 +930,8 @@ export default function ChatScreen() {
           message: `Could not play this voice note: ${err?.message || String(err)}`,
           icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e',
         });
+      } finally {
+        busyRef.current = false;
       }
     };
 
@@ -883,22 +943,37 @@ export default function ChatScreen() {
       return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
-    return (
-      <View style={styles.audioBubbleContainer}>
-        <TouchableOpacity
-          style={styles.audioPlayBtn}
-          onPress={handlePlayPause}
-        >
+    // The left button: Download (if not local yet) or Play/Pause (once ready).
+    const renderLeftButton = () => {
+      if (!localUri) {
+        return (
+          <TouchableOpacity style={styles.audioPlayBtn} onPress={downloadVoiceNote} disabled={downloading}>
+            {downloading
+              ? <ActivityIndicator size="small" color="#0df" />
+              : <Ionicons name={failed ? 'refresh' : 'arrow-down-circle-outline'} size={22} color="#0df" />}
+          </TouchableOpacity>
+        );
+      }
+      return (
+        <TouchableOpacity style={styles.audioPlayBtn} onPress={handlePlayPause}>
           <Ionicons name={isPlaying ? 'pause' : 'play'} size={20} color="#0df" />
         </TouchableOpacity>
-        
+      );
+    };
+
+    return (
+      <View style={styles.audioBubbleContainer}>
+        {renderLeftButton()}
+
         <View style={styles.audioWaveformContainer}>
           <View style={styles.audioProgressTrack}>
             <View style={[styles.audioProgressFill, { width: `${playProgress * 100}%` }]} />
           </View>
           <View style={styles.audioTimingRow}>
             <Text style={styles.audioTimeText}>
-              {isPlaying || position > 0 ? formatDuration(position) : (duration > 0 ? formatDuration(duration) : '0:00')}
+              {!localUri
+                ? (downloading ? 'Downloading…' : (failed ? 'Tap to retry' : 'Tap to download'))
+                : (isPlaying || position > 0 ? formatDuration(position) : (duration > 0 ? formatDuration(duration) : 'Voice note'))}
             </Text>
             <Ionicons name="mic-outline" size={14} color="#0df" />
           </View>
