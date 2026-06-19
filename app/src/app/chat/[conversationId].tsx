@@ -205,6 +205,9 @@ export default function ChatScreen() {
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  // Authoritative handle to the active recording (state can be stale in async flows).
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordStartRef = useRef<number>(0);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   // Live clock tick (updates every second) for the 30-day auto-purge countdown banner
   const [nowTick, setNowTick] = useState(Date.now());
@@ -490,22 +493,41 @@ export default function ChatScreen() {
         });
         return;
       }
+
+      // CRITICAL: clean up any leftover recording from a previous (failed/aborted)
+      // attempt. expo-av only allows ONE Recording object at a time — a stale one
+      // makes createAsync throw and breaks the feature entirely until app restart.
+      if (recordingRef.current) {
+        try { await recordingRef.current.stopAndUnloadAsync(); } catch (e) {}
+        recordingRef.current = null;
+        setRecording(null);
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        shouldRouteThroughEarpieceAndroid: false,
       });
 
       console.log('Starting audio recording...');
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const newRecording = new Audio.Recording();
+      await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await newRecording.startAsync();
+
+      recordingRef.current = newRecording;
+      recordStartRef.current = Date.now();
       setRecording(newRecording);
       setIsRecording(true);
     } catch (err) {
       console.error('Failed to start recording:', err);
+      // Make sure we don't leave a half-prepared recording around.
+      recordingRef.current = null;
+      setRecording(null);
+      setIsRecording(false);
+      try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch (e) {}
       showNeonAlert({
         title: 'RECORDING ERROR',
-        message: 'Failed to start audio recording.',
+        message: 'Could not start the microphone. Close any active call and try again.',
         icon: 'close-circle-outline',
         iconColor: '#f43f5e',
         borderColor: '#f43f5e',
@@ -514,17 +536,36 @@ export default function ChatScreen() {
   };
 
   const stopAudioRecording = async () => {
-    if (!recording) return;
+    const activeRecording = recordingRef.current || recording;
+    if (!activeRecording) {
+      setIsRecording(false);
+      return;
+    }
     try {
       console.log('Stopping audio recording...');
       setIsRecording(false);
-      await recording.stopAndUnloadAsync();
+      const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
+
+      await activeRecording.stopAndUnloadAsync();
       // Reset audio mode out of "recording" so playback routes correctly afterwards
       try {
         await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       } catch (e) {}
-      const uri = recording.getURI();
+      const uri = activeRecording.getURI();
+      recordingRef.current = null;
       setRecording(null);
+
+      // Ignore accidental taps (recording shorter than ~0.7s has no usable audio).
+      if (elapsed < 700) {
+        showNeonAlert({
+          title: 'TOO SHORT',
+          message: 'Hold to record a longer voice note.',
+          icon: 'mic-off-outline',
+          iconColor: '#f59e0b',
+          borderColor: '#f59e0b',
+        });
+        return;
+      }
 
       if (uri) {
         setIsUploading(true);
@@ -536,10 +577,12 @@ export default function ChatScreen() {
       }
     } catch (err: any) {
       console.error('Failed to stop recording:', err);
+      recordingRef.current = null;
+      setRecording(null);
       setIsUploading(false);
       showNeonAlert({
         title: 'RECORDING ERROR',
-        message: err.message || 'Failed to save audio recording.',
+        message: err.message || 'Failed to save the voice note.',
         icon: 'close-circle-outline',
         iconColor: '#f43f5e',
         borderColor: '#f43f5e',
@@ -629,6 +672,17 @@ export default function ChatScreen() {
   useEffect(() => {
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Safety: if the user leaves the chat mid-recording, unload it so the next
+  // recording attempt doesn't fail with "Only one Recording object" error.
+  useEffect(() => {
+    return () => {
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync().catch(() => {});
+        recordingRef.current = null;
+      }
+    };
   }, []);
 
   // Each message auto-deletes 30 days after it was sent (server TTL index). The banner
