@@ -14,6 +14,7 @@
     },
     "android": {
       "package": "com.rahulverma.nova",
+      "googleServicesFile": "./google-services.json",
       "backgroundColor": "#090d16",
       "adaptiveIcon": {
         "backgroundImage": "./assets/images/android-icon-background.png",

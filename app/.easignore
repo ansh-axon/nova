@@ -1,0 +1,26 @@
+# EAS Build uses this file (instead of .gitignore) to decide what to upload.
+# It lets us KEEP google-services.json out of git (public repo) while still
+# including it in the build, and keeps the server-only FCM key OUT of the app.
+
+# Dependencies (installed fresh on the build server)
+node_modules/
+
+# Local caches / build output
+.expo/
+dist/
+web-build/
+.gradle/
+
+# Logs
+*.log
+
+# Environment / secrets — must never go into the app build
+.env
+*.env
+
+# FCM service-account key is a SERVER secret — must NOT be bundled into the APK
+nova-244e5-firebase-adminsdk-fbsvc-5e369d554a.json
+*firebase-adminsdk*.json
+
+# NOTE: google-services.json is intentionally NOT listed here — the Android
+# build requires it for Firebase/FCM. It stays gitignored but is uploaded to EAS.
