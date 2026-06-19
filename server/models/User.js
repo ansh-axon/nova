@@ -64,6 +64,11 @@ const UserSchema = new mongoose.Schema({
   deviceFingerprint: {
     type: String,
     default: null
+  },
+  // Expo push notification tokens (one per device the user is logged in on)
+  pushTokens: {
+    type: [String],
+    default: []
   }
 }, { timestamps: true });
 

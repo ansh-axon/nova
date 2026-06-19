@@ -5,6 +5,7 @@ const Call = require('../models/Call');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const { v4: uuidv4 } = require('uuid');
+const { sendPush } = require('../utils/push');
 
 // @route   GET api/calls/history
 // @desc    Get call history for the authenticated user
@@ -70,6 +71,24 @@ router.post('/initiate', auth, async (req, res) => {
     req.io.to(`user_${recipientId}`).emit('incoming_call', populatedCall);
 
     res.json(populatedCall);
+
+    // ── Push notification for the incoming call (offline/backgrounded) ──
+    (async () => {
+      try {
+        if (Array.isArray(recipient.pushTokens) && recipient.pushTokens.length > 0) {
+          const callerName = populatedCall.caller.displayName || populatedCall.caller.username || 'Someone';
+          await sendPush(recipient.pushTokens, {
+            title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
+            body: `${callerName} is calling you on NOVA`,
+            channelId: 'calls',
+            priority: 'high',
+            data: { type: 'call', callRoomId, callType, conversationId: conversationId || null },
+          });
+        }
+      } catch (e) {
+        console.error('[PUSH] call push failed:', e.message);
+      }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error initiating call' });

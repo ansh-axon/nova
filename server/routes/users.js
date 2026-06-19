@@ -17,6 +17,37 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users/push-token
+// @desc    Register an Expo push token for the authenticated user's device
+router.post('/push-token', auth, async (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: 'A valid push token is required' });
+  }
+  try {
+    // addToSet avoids duplicate tokens; keep the list bounded to a few devices.
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { pushTokens: token.trim() } });
+    res.json({ message: 'Push token registered' });
+  } catch (err) {
+    console.error('[PUSH] register token error:', err.message);
+    res.status(500).json({ message: 'Server error registering push token' });
+  }
+});
+
+// @route   POST api/users/push-token/remove
+// @desc    Remove an Expo push token (called on logout)
+router.post('/push-token/remove', auth, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.json({ message: 'Nothing to remove' });
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $pull: { pushTokens: token.trim() } });
+    res.json({ message: 'Push token removed' });
+  } catch (err) {
+    console.error('[PUSH] remove token error:', err.message);
+    res.status(500).json({ message: 'Server error removing push token' });
+  }
+});
+
 // @route   GET api/users/me
 // @desc    Get current user details
 router.get('/me', auth, async (req, res) => {

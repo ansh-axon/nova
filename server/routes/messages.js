@@ -6,6 +6,22 @@ const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const EncryptionManager = require('../utils/encryption');
 const { generateAIReply, AI_USERNAME } = require('../utils/aiAssistant');
+const { sendPush } = require('../utils/push');
+
+// Builds a short notification preview from a message (never leaks long content).
+function notifPreview(messageType, text) {
+  switch (messageType) {
+    case 'image': return '📷 Photo';
+    case 'video': return '🎥 Video';
+    case 'audio': return '🎤 Voice note';
+    case 'file': return '📁 Document';
+    default: {
+      const t = (text || '').trim();
+      if (!t) return 'New message';
+      return t.length > 80 ? t.slice(0, 77) + '…' : t;
+    }
+  }
+}
 
 // @route   GET api/messages/:conversationId
 // @desc    Get all messages for a conversation (with decryption)
@@ -132,6 +148,39 @@ router.post('/', auth, async (req, res) => {
     });
 
     res.json(populatedMessage);
+
+    // ── Push notification to offline/backgrounded recipients ────────────
+    // Fire-and-forget: never blocks or breaks the message flow.
+    (async () => {
+      try {
+        const recipientIds = conversation.participants
+          .filter((p) => p.toString() !== req.user.id);
+        if (recipientIds.length === 0) return;
+
+        const recipients = await User.find({ _id: { $in: recipientIds } }).select('pushTokens username');
+        const tokens = [];
+        recipients.forEach((u) => {
+          if (u.username !== AI_USERNAME && Array.isArray(u.pushTokens)) tokens.push(...u.pushTokens);
+        });
+        if (tokens.length === 0) return;
+
+        const senderName = populatedMessage.sender.displayName || populatedMessage.sender.username || 'New message';
+        const preview = notifPreview(populatedMessage.messageType, text);
+        const title = conversation.isGroup
+          ? (conversation.groupName || 'Group')
+          : senderName;
+        const body = conversation.isGroup ? `${senderName}: ${preview}` : preview;
+
+        await sendPush(tokens, {
+          title,
+          body,
+          channelId: 'messages',
+          data: { type: 'message', conversationId: conversationId.toString() },
+        });
+      } catch (e) {
+        console.error('[PUSH] message push failed:', e.message);
+      }
+    })();
 
     // ── NOVA AI auto-reply ──────────────────────────────────────────────
     // If this is a 1-on-1 chat with the AI bot, generate a reply in the

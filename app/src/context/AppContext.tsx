@@ -11,6 +11,9 @@ import {
   getLockedChats as alGetLockedChats,
   setLockedChats as alSetLockedChats,
 } from '../utils/applock';
+import * as Notifications from 'expo-notifications';
+import { router } from 'expo-router';
+import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -975,6 +978,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadSession();
   }, []);
 
+  // Register for push notifications once authenticated, and upload the Expo
+  // push token to the server so it can notify this device when the app is closed.
+  const pushTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+    (async () => {
+      const pushToken = await registerForPushNotificationsAsync();
+      if (cancelled || !pushToken) return;
+      pushTokenRef.current = pushToken;
+      try {
+        await fetch(`${serverUrl}/api/users/push-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ token: pushToken }),
+        });
+      } catch (e) {
+        console.warn('[PUSH] token upload failed:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, user]);
+
+  // When the user taps a push notification, open the relevant screen.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      try {
+        const data: any = response.notification.request.content.data || {};
+        if (data.type === 'message' && data.conversationId) {
+          router.push(`/chat/${data.conversationId}` as any);
+        } else if (data.type === 'call') {
+          // Bring the app forward; the incoming-call UI is driven by the socket
+          // once it reconnects.
+          router.push('/(tabs)' as any);
+        }
+      } catch (e) {
+        console.warn('[PUSH] response handling failed:', e);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   // Initialize and manage Socket.io connection
   useEffect(() => {
     if (!token || !user) {
@@ -1621,6 +1666,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // REST API: Logout
   const logout = async () => {
+    // Best-effort: unregister this device's push token so it stops receiving pushes.
+    if (pushTokenRef.current && token) {
+      try {
+        await fetch(`${serverUrl}/api/users/push-token/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ token: pushTokenRef.current }),
+        });
+      } catch (e) { /* ignore */ }
+      pushTokenRef.current = null;
+    }
+
     if (socket) {
       socket.disconnect();
     }

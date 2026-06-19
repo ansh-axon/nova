@@ -2,7 +2,7 @@
   "expo": {
     "name": "NOVA",
     "slug": "nova-chat",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "app",
@@ -31,7 +31,8 @@
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -75,6 +76,12 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow NOVA to use Face ID / biometrics to unlock the app and locked chats."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#00ddff"
         }
       ]
     ],
