@@ -5,6 +5,7 @@ import { ActivityIndicator, View, Modal, Text, TouchableOpacity, Image, StyleShe
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
+import * as SystemUI from 'expo-system-ui';
 import NeonAlert, { NeonAlertConfig, registerNeonAlert } from '../components/NeonAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
@@ -12,6 +13,10 @@ import { RTCView } from 'react-native-webrtc';
 import GroupCallHost from '../components/GroupCallHost';
 
 const { width } = Dimensions.get('window');
+
+// Paint the native window background dark immediately, so there is NO white
+// flash between the OS launch, the splash, and the first React frame.
+SystemUI.setBackgroundColorAsync('#090d16').catch(() => {});
 
 // Hold the native splash screen on-screen until the JS app tree is ready.
 // Without this, splash auto-hides when the bundle loads, but React still has
@@ -468,7 +473,7 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#090d16' }}>
       <AppProvider>
         <StatusBar style="light" backgroundColor="#090d16" />
         <RootLayoutNav />
