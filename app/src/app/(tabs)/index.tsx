@@ -21,7 +21,7 @@ interface VaultItem {
 }
 
 export default function BentoDashboardScreen() {
-  const { conversations, users, fetchConversations, fetchUsers, startConversation, user, loading, logout, lockedChatIds, lockChat, unlockChat } = useApp();
+  const { conversations, users, fetchConversations, fetchUsers, startConversation, createGroup, sendMessage, user, loading, logout, lockedChatIds, lockChat, unlockChat } = useApp();
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [startingChat, setStartingChat] = useState(false);
@@ -29,6 +29,13 @@ export default function BentoDashboardScreen() {
   const [lockedUnlocked, setLockedUnlocked] = useState(false);
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [pendingLockId, setPendingLockId] = useState<string | null>(null);
+  // New Group + Broadcast
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [broadcastText, setBroadcastText] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [busyAction, setBusyAction] = useState(false);
   const router = useRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
@@ -62,13 +69,8 @@ export default function BentoDashboardScreen() {
       buttons: [
         { text: 'Cancel', style: 'cancel' },
         { text: '🤖 Ask NOVA AI', onPress: handleStartMetaAI },
-        { text: '🔒 Security Vault Locker', onPress: () => {
-            setIsVaultUnlocked(false);
-            setPinInput('');
-            setVaultErrorMessage(null);
-            setShowVaultModal(true);
-          }
-        },
+        { text: '👥 New Group', onPress: () => { setSelectedIds([]); setGroupName(''); setShowNewGroup(true); } },
+        { text: '📢 Broadcast', onPress: () => { setSelectedIds([]); setBroadcastText(''); setShowBroadcast(true); } },
         { text: '🚪 Logout', style: 'destructive', onPress: async () => {
             await logout();
             router.replace('/(auth)/login');
@@ -169,6 +171,56 @@ export default function BentoDashboardScreen() {
   const openLockedChats = () => {
     setLockedUnlocked(false);
     setShowLockedChats(true);
+  };
+
+  // Contacts available for groups/broadcast (exclude self + AI bot)
+  const contacts = users.filter((u) => u.id !== user?.id && u.username !== 'meta_ai');
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) {
+      showNeonAlert({ title: 'NAME REQUIRED', message: 'Please enter a group name.', icon: 'people-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+      return;
+    }
+    if (selectedIds.length === 0) {
+      showNeonAlert({ title: 'ADD MEMBERS', message: 'Select at least one member.', icon: 'person-add-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+      return;
+    }
+    if (selectedIds.length > 14) {
+      showNeonAlert({ title: 'TOO MANY', message: 'A group can have up to 15 members (including you).', icon: 'people-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+      return;
+    }
+    setBusyAction(true);
+    const convId = await createGroup(groupName.trim(), selectedIds);
+    setBusyAction(false);
+    if (convId) {
+      setShowNewGroup(false);
+      router.push(`/chat/${convId}`);
+    }
+  };
+
+  const handleSendBroadcast = async () => {
+    if (!broadcastText.trim()) {
+      showNeonAlert({ title: 'MESSAGE REQUIRED', message: 'Type a message to broadcast.', icon: 'chatbubble-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+      return;
+    }
+    if (selectedIds.length === 0) {
+      showNeonAlert({ title: 'SELECT RECIPIENTS', message: 'Choose at least one person.', icon: 'people-outline', iconColor: '#f59e0b', borderColor: '#f59e0b' });
+      return;
+    }
+    setBusyAction(true);
+    let sent = 0;
+    for (const id of selectedIds) {
+      try {
+        const cid = await startConversation(id);
+        if (cid) { await sendMessage(cid, broadcastText.trim()); sent++; }
+      } catch (e) { /* continue */ }
+    }
+    setBusyAction(false);
+    setShowBroadcast(false);
+    showNeonAlert({ title: 'BROADCAST SENT', message: `Message delivered to ${sent} of ${selectedIds.length} contact${selectedIds.length === 1 ? '' : 's'}.`, icon: 'checkmark-done-outline', iconColor: '#10b981', borderColor: '#10b981' });
   };
 
   const handleStartMetaAI = async () => {
@@ -593,6 +645,70 @@ export default function BentoDashboardScreen() {
 
       <SetSecurityPinModal visible={showPinSetup} onDone={onPinSetupDone} />
 
+      {/* New Group modal */}
+      <Modal visible={showNewGroup} animationType="slide" transparent onRequestClose={() => setShowNewGroup(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>New Group</Text>
+              <TouchableOpacity onPress={() => setShowNewGroup(false)}><Ionicons name="close" size={24} color="#cbd5e1" /></TouchableOpacity>
+            </View>
+            <TextInput style={styles.pickerInput} placeholder="Group name" placeholderTextColor="#475569" value={groupName} onChangeText={setGroupName} />
+            <Text style={styles.pickerHint}>{selectedIds.length} selected · up to 14 members</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {contacts.map((c) => {
+                const sel = selectedIds.includes(c.id);
+                return (
+                  <TouchableOpacity key={c.id} style={styles.pickerRow} onPress={() => toggleSelect(c.id)} activeOpacity={0.7}>
+                    <View style={[styles.pickerAvatar, { backgroundColor: getAvatarColor(c.displayName) }]}>
+                      <Text style={styles.avatarFallbackText}>{getInitials(c.displayName)}</Text>
+                    </View>
+                    <Text style={styles.pickerName} numberOfLines={1}>{c.displayName}</Text>
+                    <Ionicons name={sel ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={sel ? '#0df' : '#475569'} />
+                  </TouchableOpacity>
+                );
+              })}
+              {contacts.length === 0 && <Text style={styles.pickerHint}>No contacts yet.</Text>}
+            </ScrollView>
+            <TouchableOpacity style={styles.pickerBtn} onPress={handleCreateGroup} disabled={busyAction}>
+              {busyAction ? <ActivityIndicator color="#090d16" /> : <Text style={styles.pickerBtnText}>Create Group</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Broadcast modal */}
+      <Modal visible={showBroadcast} animationType="slide" transparent onRequestClose={() => setShowBroadcast(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Broadcast</Text>
+              <TouchableOpacity onPress={() => setShowBroadcast(false)}><Ionicons name="close" size={24} color="#cbd5e1" /></TouchableOpacity>
+            </View>
+            <TextInput style={[styles.pickerInput, { height: 70 }]} placeholder="Type a message to send to everyone selected…" placeholderTextColor="#475569" value={broadcastText} onChangeText={setBroadcastText} multiline />
+            <Text style={styles.pickerHint}>{selectedIds.length} recipient{selectedIds.length === 1 ? '' : 's'} selected</Text>
+            <ScrollView style={{ maxHeight: 280 }}>
+              {contacts.map((c) => {
+                const sel = selectedIds.includes(c.id);
+                return (
+                  <TouchableOpacity key={c.id} style={styles.pickerRow} onPress={() => toggleSelect(c.id)} activeOpacity={0.7}>
+                    <View style={[styles.pickerAvatar, { backgroundColor: getAvatarColor(c.displayName) }]}>
+                      <Text style={styles.avatarFallbackText}>{getInitials(c.displayName)}</Text>
+                    </View>
+                    <Text style={styles.pickerName} numberOfLines={1}>{c.displayName}</Text>
+                    <Ionicons name={sel ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={sel ? '#0df' : '#475569'} />
+                  </TouchableOpacity>
+                );
+              })}
+              {contacts.length === 0 && <Text style={styles.pickerHint}>No contacts yet.</Text>}
+            </ScrollView>
+            <TouchableOpacity style={styles.pickerBtn} onPress={handleSendBroadcast} disabled={busyAction}>
+              {busyAction ? <ActivityIndicator color="#090d16" /> : <Text style={styles.pickerBtnText}>Send Broadcast</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* --- MODAL 2: VAULT PIN LOCKER DIALOG MODAL (Kotlin Bento Replica) --- */}
       <Modal
         animationType="fade"
@@ -836,6 +952,17 @@ export default function BentoDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: '#0b1220', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 28, borderTopWidth: 1, borderColor: 'rgba(0,221,255,0.2)', maxHeight: '85%' },
+  pickerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  pickerTitle: { color: '#f8fafc', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
+  pickerInput: { backgroundColor: 'rgba(2,6,23,0.6)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', color: '#f8fafc', fontSize: 15, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10 },
+  pickerHint: { color: '#64748b', fontSize: 12, marginBottom: 10 },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.03)' },
+  pickerAvatar: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  pickerName: { flex: 1, color: '#e2e8f0', fontSize: 15, fontWeight: '600' },
+  pickerBtn: { backgroundColor: '#0df', borderRadius: 14, height: 52, justifyContent: 'center', alignItems: 'center', marginTop: 14 },
+  pickerBtnText: { color: '#090d16', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
   lockedHeader: {
     flexDirection: 'row',
     alignItems: 'center',

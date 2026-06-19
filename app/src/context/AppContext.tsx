@@ -105,6 +105,7 @@ interface AppContextType {
     mediaUrl?: string
   ) => Promise<void>;
   startConversation: (recipientId: string) => Promise<string | null>;
+  createGroup: (groupName: string, participantIds: string[]) => Promise<string | null>;
   fetchStatuses: () => Promise<void>;
   uploadStatus: (statusData: {
     statusType: 'image' | 'video' | 'text';
@@ -1875,6 +1876,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // REST API: Create a group conversation (max 15 incl. creator)
+  const createGroup = async (groupName: string, participantIds: string[]): Promise<string | null> => {
+    if (!token) return null;
+    try {
+      const response = await fetch(`${serverUrl}/api/conversations/group/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ groupName, participantIds }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showNeonAlert({ title: 'GROUP FAILED', message: data.message || 'Could not create the group.', icon: 'people-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+        return null;
+      }
+      const formattedConv = {
+        ...data,
+        participants: (data.participants || []).map((p: any) => ({
+          id: p._id, username: p.username, displayName: p.displayName,
+          about: p.about, avatarUrl: p.avatarUrl, isOnline: p.isOnline, lastSeen: p.lastSeen,
+        })),
+      };
+      setConversations((prev) => {
+        if (prev.some((c) => c._id === formattedConv._id)) return prev;
+        return [formattedConv, ...prev];
+      });
+      return formattedConv._id;
+    } catch (err) {
+      console.error('Create group error:', err);
+      showNeonAlert({ title: 'CONNECTION ERROR', message: 'Could not reach the server to create the group.', icon: 'cloud-offline-outline', borderColor: '#f43f5e', iconColor: '#f43f5e' });
+      return null;
+    }
+  };
+
   // REST API: Fetch statuses
   const fetchStatuses = async () => {
     if (!token) return;
@@ -2174,6 +2211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markConversationRead,
         sendMessage,
         startConversation,
+        createGroup,
         fetchStatuses,
         uploadStatus,
         uploadFile,
