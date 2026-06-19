@@ -383,6 +383,46 @@ function GlobalCallHost() {
   );
 }
 
+// Branded loading screen shown during the app's cold start. Keeps the NOVA
+// logo + a gentle pulse on-screen for the whole 2–4s init, so it feels like
+// "NOVA is opening" rather than a blank loading screen. It hides the native
+// splash on first paint so the transition is seamless.
+function BrandedSplash() {
+  const pulse = useRef(new Animated.Value(0.9)).current;
+  const glow = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.06, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.9, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 0.9, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0.35, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  return (
+    <View
+      style={styles.splashWrap}
+      onLayout={() => { SplashScreen.hideAsync().catch(() => {}); }}
+    >
+      <Animated.View style={[styles.splashGlow, { opacity: glow }]} />
+      <Animated.Image
+        source={require('../../assets/images/splash-icon.png')}
+        style={[styles.splashLogo, { transform: [{ scale: pulse }] }]}
+        resizeMode="contain"
+      />
+      <Text style={styles.splashTitle}>NOVA</Text>
+      <Text style={styles.splashTagline}>Connecting securely…</Text>
+    </View>
+  );
+}
+
 function RootLayoutNav() {
   const { token, loading } = useApp();
   const segments = useSegments();
@@ -410,11 +450,7 @@ function RootLayoutNav() {
   }, [token, loading, segments]);
 
   if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#090d16', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#0df" />
-      </View>
-    );
+    return <BrandedSplash />;
   }
 
   return (
@@ -445,6 +481,42 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  splashWrap: {
+    flex: 1,
+    backgroundColor: '#090d16',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  splashGlow: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: '#0df',
+    opacity: 0.18,
+    top: '38%',
+  },
+  splashLogo: {
+    width: 110,
+    height: 110,
+    marginBottom: 22,
+  },
+  splashTitle: {
+    color: '#f8fafc',
+    fontSize: 36,
+    fontWeight: '900',
+    letterSpacing: 8,
+    textShadowColor: 'rgba(0, 221, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
+  },
+  splashTagline: {
+    color: '#38bdf8',
+    fontSize: 12,
+    letterSpacing: 1.5,
+    fontWeight: '600',
+    marginTop: 12,
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#090d16',
