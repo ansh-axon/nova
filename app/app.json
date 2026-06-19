@@ -29,7 +29,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
+        "android.permission.BLUETOOTH",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -84,9 +86,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "0e9abd7d-5aa8-43ec-9714-094d3f1c7f18"
+        "projectId": "4ef5cd91-5bb3-428f-9627-1edb1182a144"
       }
     },
-    "owner": "axon_veer"
+    "owner": "ansh_nova"
   }
 }
