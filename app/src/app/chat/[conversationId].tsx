@@ -719,6 +719,30 @@ export default function ChatScreen() {
     return `${hours % 12 || 12}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
   };
 
+  // Day label for the in-chat date separators: Today / Yesterday / "17 Jun 2026".
+  const formatDaySeparator = (isoString?: string) => {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return '';
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const dayDiff = Math.round((startToday - startDate) / 86400000);
+    if (dayDiff <= 0) return 'Today';
+    if (dayDiff === 1) return 'Yesterday';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+  };
+
+  // True when this message starts a new calendar day vs the previous one.
+  const isNewDay = (current?: string, previous?: string) => {
+    if (!current) return false;
+    if (!previous) return true;
+    const c = new Date(current);
+    const p = new Date(previous);
+    return c.getFullYear() !== p.getFullYear() || c.getMonth() !== p.getMonth() || c.getDate() !== p.getDate();
+  };
+
   const getInitials = (name?: string) => {
     return name ? name.charAt(0).toUpperCase() : '?';
   };
@@ -961,13 +985,22 @@ export default function ChatScreen() {
       );
     };
 
+    // Static waveform bar heights (decorative), filled up to playback progress.
+    const BAR_HEIGHTS = [7, 13, 19, 10, 23, 15, 8, 21, 16, 25, 12, 18, 9, 23, 15, 11, 20, 13, 7, 22, 17, 10, 24, 14, 8, 17, 12, 19];
+    const filledBars = Math.round(playProgress * BAR_HEIGHTS.length);
+
     return (
       <View style={styles.audioBubbleContainer}>
         {renderLeftButton()}
 
         <View style={styles.audioWaveformContainer}>
-          <View style={styles.audioProgressTrack}>
-            <View style={[styles.audioProgressFill, { width: `${playProgress * 100}%` }]} />
+          <View style={styles.waveformRow}>
+            {BAR_HEIGHTS.map((h, i) => (
+              <View
+                key={i}
+                style={[styles.waveBar, { height: h, backgroundColor: i < filledBars ? '#0df' : 'rgba(148,163,184,0.35)' }]}
+              />
+            ))}
           </View>
           <View style={styles.audioTimingRow}>
             <Text style={styles.audioTimeText}>
@@ -975,7 +1008,7 @@ export default function ChatScreen() {
                 ? (downloading ? 'Downloading…' : (failed ? 'Tap to retry' : 'Tap to download'))
                 : (isPlaying || position > 0 ? formatDuration(position) : (duration > 0 ? formatDuration(duration) : 'Voice note'))}
             </Text>
-            <Ionicons name="mic-outline" size={14} color="#0df" />
+            <Ionicons name="mic" size={13} color="#0df" />
           </View>
         </View>
       </View>
@@ -1116,9 +1149,11 @@ export default function ChatScreen() {
     );
   };
 
-  const renderMessageItem = ({ item }: { item: Message }) => {
+  const renderMessageItem = ({ item, index }: { item: Message; index: number }) => {
     const isMe = typeof item.sender === 'string' ? item.sender === user?.id : (item.sender as any)._id === user?.id;
     const isEmoji = item.text && isOnlyEmoji(item.text);
+    const prev = index > 0 ? chatMessages[index - 1] : undefined;
+    const showDaySeparator = isNewDay(item.createdAt, prev?.createdAt);
     const isImage = (item.text && item.text.startsWith('data:image/')) || item.messageType === 'image';
     const isVideo = (item.text && item.text.startsWith('data:video/')) || item.messageType === 'video';
     const isAudio = (item.text && item.text.startsWith('data:audio/')) || item.messageType === 'audio';
@@ -1149,6 +1184,12 @@ export default function ChatScreen() {
     }
 
     return (
+      <>
+        {showDaySeparator && (
+          <View style={styles.daySeparatorRow}>
+            <Text style={styles.daySeparatorText}>{formatDaySeparator(item.createdAt)}</Text>
+          </View>
+        )}
       <View style={[styles.bubbleWrapper, isMe ? styles.myBubbleWrapper : styles.otherBubbleWrapper]}>
         {isEmoji ? (
           <View style={styles.emojiBubbleOnly}>
@@ -1207,6 +1248,7 @@ export default function ChatScreen() {
           </View>
         )}
       </View>
+      </>
     );
   };
 
@@ -1781,6 +1823,22 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 10,
   },
+  daySeparatorRow: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,221,255,0.18)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginVertical: 10,
+  },
+  daySeparatorText: {
+    color: '#67e8f9',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   inputContainer: {
     flexDirection: 'row',
     paddingHorizontal: 12,
@@ -2047,6 +2105,16 @@ const styles = StyleSheet.create({
   },
   audioWaveformContainer: {
     flex: 1,
+  },
+  waveformRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 28,
+    gap: 2,
+  },
+  waveBar: {
+    width: 3,
+    borderRadius: 2,
   },
   audioProgressTrack: {
     height: 4,

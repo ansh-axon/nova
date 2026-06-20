@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
+const Message = require('../models/Message');
 const EncryptionManager = require('../utils/encryption');
 
 // @route   GET api/conversations
@@ -18,7 +19,19 @@ router.get('/', auth, async (req, res) => {
       .populate('lastMessage')
       .sort({ updatedAt: -1 });
 
-    res.json(conversations);
+    // Attach an unread-message count for each conversation (messages sent by
+    // someone else that this user has not read yet).
+    const result = await Promise.all(conversations.map(async (c) => {
+      const obj = c.toObject();
+      obj.unreadCount = await Message.countDocuments({
+        conversation: c._id,
+        sender: { $ne: req.user.id },
+        'readBy.user': { $ne: req.user.id },
+      });
+      return obj;
+    }));
+
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error fetching conversations' });

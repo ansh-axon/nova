@@ -38,6 +38,24 @@ export default function StatusScreen() {
     { name: 'Orange', bg: '#431407', text: '#f97316' },
   ];
 
+  // Absolute status timestamp: "Today, 11:30 PM" / "Yesterday, 11:30 PM" / "17 Jun, 11:30 PM".
+  const formatStatusTime = (dateString?: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const dayDiff = Math.round((startToday - startDate) / 86400000);
+    let h = date.getHours();
+    const m = date.getMinutes().toString().padStart(2, '0');
+    const time = `${h % 12 || 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
+    if (dayDiff <= 0) return `Today, ${time}`;
+    if (dayDiff === 1) return `Yesterday, ${time}`;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${date.getDate()} ${months[date.getMonth()]}, ${time}`;
+  };
+
   // Helper to calculate time ago
   const formatTimeAgo = (dateString: string) => {
     const now = new Date();
@@ -608,7 +626,7 @@ export default function StatusScreen() {
               <View style={styles.viewerProfileInfo}>
                 <Text style={styles.viewerProfileName}>{selectedGroup.userName}</Text>
                 <Text style={styles.viewerProfileTime}>
-                  {formatTimeAgo(currentStory.createdAt)}
+                  {formatStatusTime(currentStory.createdAt)}
                 </Text>
               </View>
               {selectedGroup.userId === user?.id && (

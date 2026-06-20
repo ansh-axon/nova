@@ -48,6 +48,7 @@ export interface Conversation {
   updatedAt: string;
   isGroup?: boolean;
   groupName?: string | null;
+  unreadCount?: number;
 }
 
 export interface StatusStory {

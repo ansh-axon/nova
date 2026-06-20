@@ -283,6 +283,19 @@ export default function BentoDashboardScreen() {
     return `${hours % 12 || 12}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
   };
 
+  // Chat-list timestamp: today -> time, yesterday -> "Yesterday", else date.
+  const formatListTime = (isoString?: string) => {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const dayDiff = Math.round((startOfToday - startOfDate) / 86400000);
+    if (dayDiff <= 0) return formatTime(isoString);
+    if (dayDiff === 1) return 'Yesterday';
+    return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
+  };
+
   // Keyboard button click handler
   const handleKeyPress = (key: string) => {
     setVaultErrorMessage(null);
@@ -485,28 +498,35 @@ export default function BentoDashboardScreen() {
                       <Text style={[styles.participantName, isAI && styles.aiName]}>
                         {title}
                       </Text>
-                      <Text style={styles.chatTime}>
-                        {formatTime(item.lastMessage?.createdAt || item.updatedAt)}
+                      <Text style={[styles.chatTime, (item.unreadCount ?? 0) > 0 && styles.chatTimeUnread]}>
+                        {formatListTime(item.lastMessage?.createdAt || item.updatedAt)}
                       </Text>
                     </View>
 
                     <View style={styles.chatBody}>
-                      {item.lastMessage ? (
-                        <View style={styles.messageRow}>
-                          {item.lastMessage.sender === user?.id && (
-                            <Ionicons
-                              name={item.lastMessage.status === 'read' ? 'checkmark-done' : 'checkmark'}
-                              size={16}
-                              color={item.lastMessage.status === 'read' ? '#0df' : '#64748b'}
-                              style={{ marginRight: 4 }}
-                            />
-                          )}
-                          <Text style={styles.lastMessageText} numberOfLines={1}>
-                            {item.lastMessage.text}
-                          </Text>
+                      <View style={{ flex: 1 }}>
+                        {item.lastMessage ? (
+                          <View style={styles.messageRow}>
+                            {item.lastMessage.sender === user?.id && (
+                              <Ionicons
+                                name={item.lastMessage.status === 'read' ? 'checkmark-done' : 'checkmark'}
+                                size={16}
+                                color={item.lastMessage.status === 'read' ? '#0df' : '#64748b'}
+                                style={{ marginRight: 4 }}
+                              />
+                            )}
+                            <Text style={styles.lastMessageText} numberOfLines={1}>
+                              {item.lastMessage.text}
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.noMessageText}>{isGroup ? 'Group created · say hi 👋' : 'No messages yet'}</Text>
+                        )}
+                      </View>
+                      {(item.unreadCount ?? 0) > 0 && (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadBadgeText}>{item.unreadCount! > 99 ? '99+' : item.unreadCount}</Text>
                         </View>
-                      ) : (
-                        <Text style={styles.noMessageText}>{isGroup ? 'Group created · say hi 👋' : 'No messages yet'}</Text>
                       )}
                     </View>
                   </View>
@@ -1257,6 +1277,25 @@ const styles = StyleSheet.create({
   chatTime: {
     color: '#475569',
     fontSize: 12,
+  },
+  chatTimeUnread: {
+    color: '#10b981',
+    fontWeight: '700',
+  },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#10b981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    marginLeft: 8,
+  },
+  unreadBadgeText: {
+    color: '#04140d',
+    fontSize: 12,
+    fontWeight: '800',
   },
   chatBody: {
     flexDirection: 'row',
