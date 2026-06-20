@@ -21,6 +21,10 @@ const BUILTIN_TONES: { id: string; name: string; kind: 'short' | 'ring'; module:
   { id: 'glow', name: 'Glow', kind: 'short', module: require('../../../assets/tones/glow.wav') },
   { id: 'beacon', name: 'Beacon (ring)', kind: 'ring', module: require('../../../assets/tones/beacon.wav') },
   { id: 'aurora', name: 'Aurora (ring)', kind: 'ring', module: require('../../../assets/tones/aurora.wav') },
+  { id: 'marimba', name: 'Marimba (ring)', kind: 'ring', module: require('../../../assets/tones/marimba.wav') },
+  { id: 'classic', name: 'Classic Ring', kind: 'ring', module: require('../../../assets/tones/classic.wav') },
+  { id: 'bright', name: 'Bright', kind: 'short', module: require('../../../assets/tones/bright.wav') },
+  { id: 'bubble', name: 'Bubble', kind: 'short', module: require('../../../assets/tones/bubble.wav') },
 ];
 
 export default function SettingsScreen() {

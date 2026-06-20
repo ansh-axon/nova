@@ -154,4 +154,48 @@ function makeBuffer(seconds) {
   writeWav('ring_call.wav', b);
 })();
 
+// ── Extra original tones (inspired by popular phone styles, not copies) ──
+
+// Marimba: a bright woody marimba-style melody (iPhone "Marimba" vibe), ~3.6s.
+// Short, fast-decaying notes give the percussive marimba character.
+(() => {
+  const b = makeBuffer(3.8);
+  const melody = [N.C6, N.G5, N.C6, N.E6, N.G5, N.C6, N.E6, N.C6];
+  for (let r = 0; r < 3; r++) {
+    const base = r * 1.2;
+    melody.forEach((f, i) => addNote(b, base + i * 0.14, 0.22, f, 0.55));
+  }
+  writeWav('marimba.wav', b);
+})();
+
+// Classic: a classic telephone-style two-tone warble ring, ~4s.
+(() => {
+  const b = makeBuffer(4.0);
+  for (let r = 0; r < 4; r++) {
+    const o = r * 1.0;
+    // brrr-brrr: rapid alternation of two close tones
+    for (let k = 0; k < 8; k++) {
+      addNote(b, o + k * 0.05, 0.06, k % 2 === 0 ? N.A5 : N.C6, 0.5);
+    }
+  }
+  writeWav('classic.wav', b);
+})();
+
+// Bright: a cheerful three-note rising message ding.
+(() => {
+  const b = makeBuffer(0.7);
+  addNote(b, 0.0, 0.25, N.G5, 0.6);
+  addNote(b, 0.1, 0.25, N.C6, 0.6);
+  addNote(b, 0.2, 0.4, N.E6, 0.65);
+  writeWav('bright.wav', b);
+})();
+
+// Bubble: a short soft "pop" message tone.
+(() => {
+  const b = makeBuffer(0.4);
+  addNote(b, 0.0, 0.18, N.C6, 0.5);
+  addNote(b, 0.06, 0.3, N.G6, 0.6);
+  writeWav('bubble.wav', b);
+})();
+
 console.log('Done. Tones in', OUT);
