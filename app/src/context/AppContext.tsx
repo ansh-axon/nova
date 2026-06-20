@@ -1915,6 +1915,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
           return updatedConvs.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         });
+      } else {
+        // Server rejected (e.g., blocked). Remove the optimistic message + inform.
+        setMessages((prev) => ({
+          ...prev,
+          [conversationId]: (prev[conversationId] || []).filter((m) => m._id !== tempId)
+        }));
+        showNeonAlert({
+          title: 'NOT SENT',
+          message: realMessage?.message || 'Message could not be sent.',
+          icon: 'ban-outline', borderColor: '#f43f5e', iconColor: '#f43f5e',
+        });
       }
     } catch (err) {
       console.error('Error sending message:', err);
