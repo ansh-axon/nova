@@ -40,6 +40,8 @@ export interface Message {
   updatedAt: string;
   messageType?: 'text' | 'image' | 'video' | 'audio' | 'file';
   mediaUrl?: string;
+  edited?: boolean;
+  deletedForEveryone?: boolean;
 }
 
 export interface Conversation {
@@ -106,6 +108,8 @@ interface AppContextType {
   blockUser: (userId: string) => Promise<boolean>;
   unblockUser: (userId: string) => Promise<boolean>;
   clearChat: (conversationId: string) => Promise<boolean>;
+  editMessage: (messageId: string, text: string) => Promise<boolean>;
+  deleteMessageForEveryone: (messageId: string) => Promise<boolean>;
   sendMessage: (
     conversationId: string, 
     text: string, 
@@ -1141,8 +1145,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     });
 
+    // A message was edited by its sender — update it in place everywhere.
+    socketInstance.on('message_edited', (updated: Message) => {
+      const convId = (updated as any).conversation;
+      setMessages((prev) => {
+        const list = prev[convId] || [];
+        return { ...prev, [convId]: list.map((m) => (m._id === updated._id ? updated : m)) };
+      });
+    });
+
+    // A message was deleted for everyone — replace it with a tombstone.
+    socketInstance.on('message_deleted', (data: { _id: string; conversation: string }) => {
+      setMessages((prev) => {
+        const list = prev[data.conversation] || [];
+        return {
+          ...prev,
+          [data.conversation]: list.map((m) =>
+            m._id === data._id ? { ...m, deletedForEveryone: true, text: '', mediaUrl: undefined } : m
+          ),
+        };
+      });
+    });
+
     socketInstance.on('user_status_changed', (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
-      // Update online status in local users list
       setUsers((prevUsers) =>
         prevUsers.map((u) => (u.id === data.userId ? { ...u, isOnline: data.isOnline, lastSeen: data.lastSeen } : u))
       );
@@ -1969,7 +1994,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Clear/delete a chat: removes it for this user (server soft-deletes 1-on-1).
+  // Clear/delete a chat: removes it for this user (server soft-deletes 1-on-1,
+  // and removes the member from a group = leave group).
   const clearChat = async (conversationId: string): Promise<boolean> => {
     if (!token) return false;
     try {
@@ -1984,6 +2010,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return res.ok;
     } catch (e) {
       console.log('clearChat failed:', e);
+      return false;
+    }
+  };
+
+  // Edit your own text message (server re-encrypts + notifies everyone).
+  const editMessage = async (messageId: string, text: string): Promise<boolean> => {
+    if (!token || !text.trim()) return false;
+    try {
+      const res = await fetch(`${serverUrl}/api/messages/${messageId}/edit`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMessages((prev) => {
+          const convId = updated.conversation;
+          const list = prev[convId] || [];
+          return { ...prev, [convId]: list.map((m) => (m._id === updated._id ? updated : m)) };
+        });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.log('editMessage failed:', e);
+      return false;
+    }
+  };
+
+  // Delete your own message for everyone.
+  const deleteMessageForEveryone = async (messageId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const res = await fetch(`${serverUrl}/api/messages/${messageId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setMessages((prev) => {
+          const next: { [k: string]: Message[] } = {};
+          for (const cid of Object.keys(prev)) {
+            next[cid] = prev[cid].map((m) => (m._id === messageId ? { ...m, deletedForEveryone: true, text: '', mediaUrl: undefined } : m));
+          }
+          return next;
+        });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.log('deleteMessageForEveryone failed:', e);
       return false;
     }
   };
@@ -2378,6 +2454,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         blockUser,
         unblockUser,
         clearChat,
+        editMessage,
+        deleteMessageForEveryone,
         sendMessage,
         startConversation,
         createGroup,

@@ -249,6 +249,90 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
+// @route   PUT api/messages/:messageId/edit
+// @desc    Edit your own text message (re-encrypts, marks edited, notifies all)
+router.put('/:messageId/edit', auth, async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ message: 'Text is required' });
+  try {
+    const message = await Message.findById(req.params.messageId);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (message.sender.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'You can only edit your own messages' });
+    }
+    if (message.messageType !== 'text') {
+      return res.status(400).json({ message: 'Only text messages can be edited' });
+    }
+    if (message.deletedForEveryone) {
+      return res.status(400).json({ message: 'This message was deleted' });
+    }
+
+    const conversation = await Conversation.findById(message.conversation);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+
+    // Re-encrypt the new text the same way it was originally encrypted.
+    let encryptedContent = null;
+    const sender = await User.findById(req.user.id).select('+secretKey');
+    if (conversation.isGroup) {
+      if (conversation.groupEncryptionKey) {
+        encryptedContent = EncryptionManager.encryptGroupMessage(text, conversation.groupEncryptionKey);
+      }
+    } else {
+      const recipient = conversation.participants.find(p => p.toString() !== req.user.id);
+      const recipientUser = await User.findById(recipient);
+      if (sender.secretKey && recipientUser && recipientUser.publicKey) {
+        encryptedContent = EncryptionManager.encryptMessage(text, sender.secretKey, recipientUser.publicKey);
+      }
+    }
+
+    message.text = text.trim();
+    message.encryptedContent = encryptedContent;
+    message.edited = true;
+    await message.save();
+
+    const populated = await Message.findById(message._id).populate('sender', 'username displayName avatarUrl');
+    conversation.participants.forEach((pid) => {
+      req.io.to(`user_${pid.toString()}`).emit('message_edited', populated);
+    });
+    res.json(populated);
+  } catch (err) {
+    console.error('[EDIT] error:', err.message);
+    res.status(500).json({ message: 'Server error editing message' });
+  }
+});
+
+// @route   DELETE api/messages/:messageId
+// @desc    Delete your own message for everyone (notifies all participants)
+router.delete('/:messageId', auth, async (req, res) => {
+  try {
+    const message = await Message.findById(req.params.messageId);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (message.sender.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
+    }
+    const conversation = await Conversation.findById(message.conversation);
+
+    message.deletedForEveryone = true;
+    message.text = null;
+    message.encryptedContent = null;
+    message.mediaUrl = null;
+    await message.save();
+
+    if (conversation) {
+      conversation.participants.forEach((pid) => {
+        req.io.to(`user_${pid.toString()}`).emit('message_deleted', {
+          _id: message._id.toString(),
+          conversation: message.conversation.toString(),
+        });
+      });
+    }
+    res.json({ message: 'Message deleted', _id: message._id.toString() });
+  } catch (err) {
+    console.error('[DELETE MSG] error:', err.message);
+    res.status(500).json({ message: 'Server error deleting message' });
+  }
+});
+
 // @route   PUT api/messages/:messageId/read
 // @desc    Mark message as read
 router.put('/:messageId/read', auth, async (req, res) => {

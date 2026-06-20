@@ -43,6 +43,15 @@ const MessageSchema = new mongoose.Schema({
   },
   // For media: file URL or base64
   mediaUrl: String,
+  // Edit / delete-for-everyone flags
+  edited: {
+    type: Boolean,
+    default: false
+  },
+  deletedForEveryone: {
+    type: Boolean,
+    default: false
+  },
   // Auto-delete after 30 days to save space and ensure E2E privacy
   expiresAt: {
     type: Date,

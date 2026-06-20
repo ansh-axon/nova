@@ -388,7 +388,9 @@ export default function ChatScreen() {
     setActiveConversationId,
     blockUser,
     unblockUser,
-    clearChat
+    clearChat,
+    editMessage,
+    deleteMessageForEveryone
   } = useApp();
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -408,6 +410,7 @@ export default function ChatScreen() {
   const recordStartRef = useRef<number>(0);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   // Live clock tick (updates every second) for the 30-day auto-purge countdown banner
   const [nowTick, setNowTick] = useState(Date.now());
 
@@ -494,6 +497,15 @@ export default function ChatScreen() {
 
     const textToSend = inputText;
     setInputText('');
+
+    // If we're editing an existing message, update it instead of sending new.
+    if (editingMessageId) {
+      const idToEdit = editingMessageId;
+      setEditingMessageId(null);
+      const ok = await editMessage(idToEdit, textToSend);
+      if (!ok) showNeonAlert({ title: 'EDIT FAILED', message: 'Could not edit the message. Try again.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+      return;
+    }
     
     // Stop typing status if active
     if (isTyping && socket && otherParticipant && !isAI) {
@@ -573,6 +585,25 @@ export default function ChatScreen() {
     });
   };
 
+  const handleLeaveGroup = () => {
+    setShowChatMenu(false);
+    showNeonAlert({
+      title: 'LEAVE GROUP',
+      message: 'Are you sure you want to leave this group? You will stop receiving its messages.',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave', style: 'destructive', onPress: async () => {
+            const ok = await clearChat(conversationId);
+            if (ok) router.back();
+            else showNeonAlert({ title: 'FAILED', message: 'Could not leave the group. Try again.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+          }
+        },
+      ],
+      icon: 'exit-outline', iconColor: '#f43f5e', borderColor: '#f43f5e',
+    });
+  };
+
   const handleBlockUser = () => {
     setShowChatMenu(false);
     if (!otherParticipant) return;
@@ -616,6 +647,34 @@ export default function ChatScreen() {
       ],
       icon: 'checkmark-circle-outline', iconColor: '#10b981', borderColor: '#10b981',
     });
+  };
+
+  // Long-press on one of YOUR text messages → Edit / Delete for everyone.
+  const handleMessageLongPress = (item: Message) => {
+    const isMine = typeof item.sender === 'string' ? item.sender === user?.id : (item.sender as any)?._id === user?.id;
+    if (!isMine || item.deletedForEveryone) return;
+    const isText = (item.messageType || 'text') === 'text' && !!item.text;
+    const buttons: any[] = [{ text: 'Cancel', style: 'cancel' }];
+    if (isText) {
+      buttons.push({ text: 'Edit', onPress: () => { setEditingMessageId(item._id); setInputText(item.text); } });
+    }
+    buttons.push({
+      text: 'Delete for everyone', style: 'destructive', onPress: async () => {
+        const ok = await deleteMessageForEveryone(item._id);
+        if (!ok) showNeonAlert({ title: 'FAILED', message: 'Could not delete the message.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+      }
+    });
+    showNeonAlert({
+      title: 'MESSAGE OPTIONS',
+      message: 'Choose an action for your message.',
+      buttons,
+      icon: 'ellipsis-horizontal-circle-outline', iconColor: '#0df', borderColor: '#0df',
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingMessageId(null);
+    setInputText('');
   };
 
   // Advanced Secure Attachment Selectors
@@ -1227,6 +1286,7 @@ export default function ChatScreen() {
     const isPoll = item.text && item.text.startsWith('POLL:');
     const isEvent = item.text && item.text.startsWith('EVENT:');
     const isDocument = (item.text && (item.text.includes('📁 Secure Document') || item.text.startsWith('data:application/'))) || item.messageType === 'file';
+    const isDeleted = !!item.deletedForEveryone;
 
     const mediaSourceUri = item.mediaUrl
       ? (item.mediaUrl.startsWith('http') ? item.mediaUrl : `${serverUrl}${item.mediaUrl}`)
@@ -1258,15 +1318,24 @@ export default function ChatScreen() {
           </View>
         )}
       <View style={[styles.bubbleWrapper, isMe ? styles.myBubbleWrapper : styles.otherBubbleWrapper]}>
-        {isEmoji ? (
+        {isDeleted ? (
+          <View style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble]}>
+            <Text style={styles.deletedMessageText}>🚫 This message was deleted</Text>
+            <View style={styles.bubbleFooter}>
+              <Text style={styles.messageTime}>{formatTime(item.createdAt)}</Text>
+            </View>
+          </View>
+        ) : isEmoji ? (
+          <TouchableOpacity activeOpacity={0.9} onLongPress={() => handleMessageLongPress(item)} delayLongPress={300}>
           <View style={styles.emojiBubbleOnly}>
             <AnimatedEmoji emoji={item.text} />
             <Text style={[styles.messageTime, { alignSelf: 'flex-end', marginTop: 4 }]}>
               {formatTime(item.createdAt)}
             </Text>
           </View>
+          </TouchableOpacity>
         ) : (
-          <View style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble, (isPoll || isEvent || isDocument) ? styles.bentoCardBubble : null]}>
+          <TouchableOpacity activeOpacity={0.9} onLongPress={() => handleMessageLongPress(item)} delayLongPress={300} style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble, (isPoll || isEvent || isDocument) ? styles.bentoCardBubble : null]}>
             {isImage ? (
               <TouchableOpacity onPress={() => {
                 setFullViewImageUri(mediaSourceUri);
@@ -1303,6 +1372,7 @@ export default function ChatScreen() {
             )}
             <View style={styles.bubbleFooter}>
               <Text style={styles.messageTime}>{formatTime(item.createdAt)}</Text>
+              {item.edited && <Text style={styles.editedLabel}>edited</Text>}
               {isMe && (
                 <Ionicons
                   name={item.status === 'read' ? 'checkmark-done' : 'checkmark'}
@@ -1312,7 +1382,7 @@ export default function ChatScreen() {
                 />
               )}
             </View>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
       </>
@@ -1391,22 +1461,31 @@ export default function ChatScreen() {
       <Modal visible={showChatMenu} transparent animationType="fade" onRequestClose={() => setShowChatMenu(false)}>
         <TouchableOpacity style={styles.chatMenuOverlay} activeOpacity={1} onPress={() => setShowChatMenu(false)}>
           <View style={styles.chatMenuCard}>
-            <TouchableOpacity style={styles.chatMenuItem} onPress={handleClearChat}>
-              <Ionicons name="trash-outline" size={18} color="#f59e0b" />
-              <Text style={styles.chatMenuText}>Clear chat</Text>
-            </TouchableOpacity>
-            {!isAI && (
-              isUserBlocked ? (
-                <TouchableOpacity style={styles.chatMenuItem} onPress={handleUnblockUser}>
-                  <Ionicons name="checkmark-circle-outline" size={18} color="#10b981" />
-                  <Text style={[styles.chatMenuText, { color: '#10b981' }]}>Unblock user</Text>
+            {conversation?.isGroup ? (
+              <TouchableOpacity style={styles.chatMenuItem} onPress={handleLeaveGroup}>
+                <Ionicons name="exit-outline" size={18} color="#f43f5e" />
+                <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Leave group</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.chatMenuItem} onPress={handleClearChat}>
+                  <Ionicons name="trash-outline" size={18} color="#f59e0b" />
+                  <Text style={styles.chatMenuText}>Clear chat</Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.chatMenuItem} onPress={handleBlockUser}>
-                  <Ionicons name="ban-outline" size={18} color="#f43f5e" />
-                  <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Block user</Text>
-                </TouchableOpacity>
-              )
+                {!isAI && (
+                  isUserBlocked ? (
+                    <TouchableOpacity style={styles.chatMenuItem} onPress={handleUnblockUser}>
+                      <Ionicons name="checkmark-circle-outline" size={18} color="#10b981" />
+                      <Text style={[styles.chatMenuText, { color: '#10b981' }]}>Unblock user</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity style={styles.chatMenuItem} onPress={handleBlockUser}>
+                      <Ionicons name="ban-outline" size={18} color="#f43f5e" />
+                      <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Block user</Text>
+                    </TouchableOpacity>
+                  )
+                )}
+              </>
             )}
           </View>
         </TouchableOpacity>
@@ -1513,6 +1592,17 @@ export default function ChatScreen() {
                 <Ionicons name="ticket" size={20} color="#fff" />
               </View>
               <Text style={styles.panelItemText}>Event</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Editing banner */}
+        {editingMessageId && (
+          <View style={styles.editingBanner}>
+            <Ionicons name="create-outline" size={16} color="#0df" />
+            <Text style={styles.editingBannerText}>Editing message</Text>
+            <TouchableOpacity onPress={cancelEditing}>
+              <Ionicons name="close" size={18} color="#94a3b8" />
             </TouchableOpacity>
           </View>
         )}
@@ -1944,6 +2034,33 @@ const styles = StyleSheet.create({
   messageTime: {
     color: '#94a3b8',
     fontSize: 10,
+  },
+  editedLabel: {
+    color: '#64748b',
+    fontSize: 10,
+    fontStyle: 'italic',
+    marginLeft: 6,
+  },
+  editingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,221,255,0.08)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,221,255,0.2)',
+  },
+  editingBannerText: {
+    flex: 1,
+    color: '#0df',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  deletedMessageText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   daySeparatorRow: {
     alignSelf: 'center',
