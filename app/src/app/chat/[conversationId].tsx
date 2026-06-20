@@ -387,6 +387,7 @@ export default function ChatScreen() {
     markConversationRead,
     setActiveConversationId,
     blockUser,
+    unblockUser,
     clearChat
   } = useApp();
   const [inputText, setInputText] = useState('');
@@ -433,6 +434,7 @@ export default function ChatScreen() {
   const conversation = conversations.find((c) => c._id === conversationId);
   const otherParticipant = conversation?.participants.find((p) => p.id !== user?.id) || conversation?.participants[0];
   const isAI = otherParticipant?.username === 'meta_ai';
+  const isUserBlocked = !!(otherParticipant && (user?.blockedUsers || []).includes(otherParticipant.id));
 
   // Load message history on focus
   useEffect(() => {
@@ -592,6 +594,27 @@ export default function ChatScreen() {
         },
       ],
       icon: 'ban-outline', iconColor: '#f43f5e', borderColor: '#f43f5e',
+    });
+  };
+
+  const handleUnblockUser = () => {
+    setShowChatMenu(false);
+    if (!otherParticipant) return;
+    showNeonAlert({
+      title: 'UNBLOCK USER',
+      message: `Unblock ${otherParticipant.displayName || otherParticipant.username}? You will be able to message each other again.`,
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock', onPress: async () => {
+            const ok = await unblockUser(otherParticipant.id);
+            showNeonAlert(ok
+              ? { title: 'UNBLOCKED', message: 'You can message each other again.', icon: 'checkmark-circle-outline', iconColor: '#10b981', borderColor: '#10b981' }
+              : { title: 'FAILED', message: 'Could not unblock. Try again.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+          }
+        },
+      ],
+      icon: 'checkmark-circle-outline', iconColor: '#10b981', borderColor: '#10b981',
     });
   };
 
@@ -1373,10 +1396,17 @@ export default function ChatScreen() {
               <Text style={styles.chatMenuText}>Clear chat</Text>
             </TouchableOpacity>
             {!isAI && (
-              <TouchableOpacity style={styles.chatMenuItem} onPress={handleBlockUser}>
-                <Ionicons name="ban-outline" size={18} color="#f43f5e" />
-                <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Block user</Text>
-              </TouchableOpacity>
+              isUserBlocked ? (
+                <TouchableOpacity style={styles.chatMenuItem} onPress={handleUnblockUser}>
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#10b981" />
+                  <Text style={[styles.chatMenuText, { color: '#10b981' }]}>Unblock user</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.chatMenuItem} onPress={handleBlockUser}>
+                  <Ionicons name="ban-outline" size={18} color="#f43f5e" />
+                  <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Block user</Text>
+                </TouchableOpacity>
+              )
             )}
           </View>
         </TouchableOpacity>

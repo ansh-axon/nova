@@ -27,6 +27,7 @@ export interface User {
   avatarUrl: string;
   isOnline?: boolean;
   lastSeen?: string;
+  blockedUsers?: string[];
 }
 
 export interface Message {
@@ -1927,6 +1928,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ userId }),
       });
+      if (res.ok) {
+        setUser((prev) => prev ? { ...prev, blockedUsers: Array.from(new Set([...(prev.blockedUsers || []), userId])) } : prev);
+      }
       return res.ok;
     } catch (e) {
       console.log('blockUser failed:', e);
@@ -1942,6 +1946,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ userId }),
       });
+      if (res.ok) {
+        setUser((prev) => prev ? { ...prev, blockedUsers: (prev.blockedUsers || []).filter((id) => id !== userId) } : prev);
+      }
       return res.ok;
     } catch (e) {
       console.log('unblockUser failed:', e);
