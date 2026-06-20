@@ -13,14 +13,16 @@ const { width, height } = Dimensions.get('window');
 // MODULE-LEVEL status video player, memoized so the parent's frequent progress
 // re-renders do NOT thrash/re-buffer the video (that was the real stutter cause,
 // even for locally-cached videos). It keeps its own buffering state and only
-// calls the stable onProgress/onFinish callbacks.
-const StatusVideoPlayer = React.memo(({ uri, shouldPlay, onProgress, onFinish }: {
+// reports the video duration once, so the parent can drive a smooth, reliable
+// time-based progress bar (the player's progress callback sometimes stops
+// emitting, which froze the old bar).
+const StatusVideoPlayer = React.memo(({ uri, shouldPlay, onDuration }: {
   uri: string;
   shouldPlay: boolean;
-  onProgress: (p: number) => void;
-  onFinish: () => void;
+  onDuration: (ms: number) => void;
 }) => {
   const [buffering, setBuffering] = useState(true);
+  const reportedRef = useRef(false);
   return (
     <>
       <Video
@@ -37,11 +39,9 @@ const StatusVideoPlayer = React.memo(({ uri, shouldPlay, onProgress, onFinish }:
         onPlaybackStatusUpdate={(status: any) => {
           if (status.isLoaded) {
             setBuffering(!!status.isBuffering && !status.isPlaying);
-            if (status.durationMillis) {
-              onProgress(Math.min(1, status.positionMillis / status.durationMillis));
-            }
-            if (status.didJustFinish) {
-              onFinish();
+            if (status.durationMillis && !reportedRef.current) {
+              reportedRef.current = true;
+              onDuration(status.durationMillis);
             }
           }
         }}
@@ -69,6 +69,8 @@ export default function StatusScreen() {
   // Locally-cached video source for the current story (keyed by story id) so a
   // video streams the first time, then plays from local cache on later views.
   const [videoCache, setVideoCache] = useState<{ id: string; uri: string } | null>(null);
+  // Duration of the current video story (drives the time-based progress bar).
+  const [videoDurationMs, setVideoDurationMs] = useState(0);
 
   // Text status creator states
   const [showTextModal, setShowTextModal] = useState(false);
@@ -201,6 +203,7 @@ export default function StatusScreen() {
   useEffect(() => {
     const cur = selectedGroup?.stories?.[currentStoryIndex];
     if (!cur || cur.statusType !== 'video' || !cur.mediaUrl) return;
+    setVideoDurationMs(0); // reset; wait for the new video to report its duration
     const remote = cur.mediaUrl.startsWith('http') ? cur.mediaUrl : `${serverUrl}${cur.mediaUrl}`;
     let active = true;
     (async () => {
@@ -217,22 +220,24 @@ export default function StatusScreen() {
     return () => { active = false; };
   }, [selectedGroup, currentStoryIndex, serverUrl]);
 
-  // Story Auto-Progress Timer Animation (images/text only — videos are driven by
-  // their own playback so they are NOT cut off at 5 seconds).
+  // Story auto-progress: a smooth, time-based bar for BOTH images/text (5s) and
+  // videos (their real duration). Driving it by time — not the video player's
+  // progress callback — means the bar never freezes mid-play.
   useEffect(() => {
     if (!selectedGroup) return;
     const cur = selectedGroup.stories?.[currentStoryIndex];
     const isVideoStory = cur?.statusType === 'video';
-    // Videos drive their own progress via onPlaybackStatusUpdate.
-    if (isVideoStory) return;
+    // For videos, wait until we know the duration before starting the bar.
+    if (isVideoStory && videoDurationMs <= 0) {
+      setProgress(0);
+      return;
+    }
+    const durationMs = isVideoStory ? videoDurationMs : 5000;
 
-    // Timestamp-based progress: reliable and resets cleanly for every story,
-    // so the second (and later) stories fill their bar fully like the first.
     setProgress(0);
-    const STORY_MS = 5000; // image/text shown for ~5 seconds
     const startedAt = Date.now();
     const interval = setInterval(() => {
-      const p = Math.min(1, (Date.now() - startedAt) / STORY_MS);
+      const p = Math.min(1, (Date.now() - startedAt) / durationMs);
       setProgress(p);
       if (p >= 1) {
         clearInterval(interval);
@@ -240,7 +245,7 @@ export default function StatusScreen() {
       }
     }, 50);
     return () => clearInterval(interval);
-  }, [selectedGroup, currentStoryIndex]);
+  }, [selectedGroup, currentStoryIndex, videoDurationMs]);
 
   // Mark viewed when a new story loads
   useEffect(() => {
@@ -278,8 +283,7 @@ export default function StatusScreen() {
   // (and never re-buffers) just because the parent re-rendered for progress.
   const handleNextStoryRef = useRef(handleNextStory);
   handleNextStoryRef.current = handleNextStory;
-  const onVideoProgress = useCallback((p: number) => setProgress(p), []);
-  const onVideoFinish = useCallback(() => handleNextStoryRef.current?.(), []);
+  const onVideoDuration = useCallback((ms: number) => setVideoDurationMs(ms), []);
 
   // Delete the currently-viewed status (own status only).
   const handleDeleteCurrentStatus = () => {
@@ -721,8 +725,7 @@ export default function StatusScreen() {
                     <StatusVideoPlayer
                       uri={videoSourceUri}
                       shouldPlay={selectedGroup !== null}
-                      onProgress={onVideoProgress}
-                      onFinish={onVideoFinish}
+                      onDuration={onVideoDuration}
                     />
                     {currentStory.textContent && (
                       <View style={styles.imageTextCaptionBg}>

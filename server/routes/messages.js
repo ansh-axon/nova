@@ -112,6 +112,12 @@ router.post('/', auth, async (req, res) => {
       // 1-on-1 message - use asymmetric encryption
       const recipient = conversation.participants.find(p => p.toString() !== req.user.id);
       const recipientUser = await User.findById(recipient);
+      // Block enforcement: if either side has blocked the other, refuse to send.
+      const senderBlocked = (sender.blockedUsers || []).some(id => id.toString() === recipient.toString());
+      const recipientBlocked = (recipientUser?.blockedUsers || []).some(id => id.toString() === req.user.id);
+      if (senderBlocked || recipientBlocked) {
+        return res.status(403).json({ message: 'You can no longer message this user.' });
+      }
       if (sender.secretKey && recipientUser.publicKey) {
         encryptedContent = EncryptionManager.encryptMessage(text, sender.secretKey, recipientUser.publicKey);
       }

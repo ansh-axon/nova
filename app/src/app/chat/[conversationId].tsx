@@ -385,7 +385,9 @@ export default function ChatScreen() {
     setCallDuration, 
     setActiveCall,
     markConversationRead,
-    setActiveConversationId
+    setActiveConversationId,
+    blockUser,
+    clearChat
   } = useApp();
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -404,6 +406,7 @@ export default function ChatScreen() {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordStartRef = useRef<number>(0);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
   // Live clock tick (updates every second) for the 30-day auto-purge countdown banner
   const [nowTick, setNowTick] = useState(Date.now());
 
@@ -547,6 +550,49 @@ export default function ChatScreen() {
     } catch (err) {
       console.log('Call log failed, but call UI continues:', err);
     }
+  };
+
+  const handleClearChat = () => {
+    setShowChatMenu(false);
+    showNeonAlert({
+      title: 'CLEAR CHAT',
+      message: 'Remove this chat and its messages from your device? This cannot be undone.',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear', style: 'destructive', onPress: async () => {
+            const ok = await clearChat(conversationId);
+            if (ok) router.back();
+            else showNeonAlert({ title: 'FAILED', message: 'Could not clear the chat. Try again.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+          }
+        },
+      ],
+      icon: 'trash-outline', iconColor: '#f59e0b', borderColor: '#f59e0b',
+    });
+  };
+
+  const handleBlockUser = () => {
+    setShowChatMenu(false);
+    if (!otherParticipant) return;
+    showNeonAlert({
+      title: 'BLOCK USER',
+      message: `Block ${otherParticipant.displayName || otherParticipant.username}? You will no longer be able to message each other.`,
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block', style: 'destructive', onPress: async () => {
+            const ok = await blockUser(otherParticipant.id);
+            if (ok) {
+              showNeonAlert({ title: 'BLOCKED', message: 'User has been blocked.', icon: 'ban-outline', iconColor: '#10b981', borderColor: '#10b981' });
+              router.back();
+            } else {
+              showNeonAlert({ title: 'FAILED', message: 'Could not block this user. Try again.', icon: 'close-circle-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+            }
+          }
+        },
+      ],
+      icon: 'ban-outline', iconColor: '#f43f5e', borderColor: '#f43f5e',
+    });
   };
 
   // Advanced Secure Attachment Selectors
@@ -1312,8 +1358,29 @@ export default function ChatScreen() {
           <TouchableOpacity style={styles.headerActionBtn} onPress={() => handleStartCall('video')}>
             <Ionicons name="videocam-outline" size={22} color="#cbd5e1" />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowChatMenu(true)}>
+            <Ionicons name="ellipsis-vertical" size={20} color="#cbd5e1" />
+          </TouchableOpacity>
         </View>
       </View>
+
+      {/* Chat 3-dot menu: Block / Clear chat */}
+      <Modal visible={showChatMenu} transparent animationType="fade" onRequestClose={() => setShowChatMenu(false)}>
+        <TouchableOpacity style={styles.chatMenuOverlay} activeOpacity={1} onPress={() => setShowChatMenu(false)}>
+          <View style={styles.chatMenuCard}>
+            <TouchableOpacity style={styles.chatMenuItem} onPress={handleClearChat}>
+              <Ionicons name="trash-outline" size={18} color="#f59e0b" />
+              <Text style={styles.chatMenuText}>Clear chat</Text>
+            </TouchableOpacity>
+            {!isAI && (
+              <TouchableOpacity style={styles.chatMenuItem} onPress={handleBlockUser}>
+                <Ionicons name="ban-outline" size={18} color="#f43f5e" />
+                <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Block user</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* 30-Day Auto-Purge Live Countdown Banner */}
       {getPurgeCountdown() && (
@@ -1714,6 +1781,33 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  chatMenuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  chatMenuCard: {
+    position: 'absolute',
+    top: 56,
+    right: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,221,255,0.2)',
+    paddingVertical: 6,
+    minWidth: 168,
+  },
+  chatMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  chatMenuText: {
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '600',
   },
   headerActionBtn: {
     padding: 10,

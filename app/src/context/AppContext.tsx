@@ -102,6 +102,9 @@ interface AppContextType {
   fetchConversations: () => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
   markConversationRead: (conversationId: string) => Promise<void>;
+  blockUser: (userId: string) => Promise<boolean>;
+  unblockUser: (userId: string) => Promise<boolean>;
+  clearChat: (conversationId: string) => Promise<boolean>;
   sendMessage: (
     conversationId: string, 
     text: string, 
@@ -1915,6 +1918,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Block a user (server stops messages both ways).
+  const blockUser = async (userId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const res = await fetch(`${serverUrl}/api/users/block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.log('blockUser failed:', e);
+      return false;
+    }
+  };
+
+  const unblockUser = async (userId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const res = await fetch(`${serverUrl}/api/users/unblock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId }),
+      });
+      return res.ok;
+    } catch (e) {
+      console.log('unblockUser failed:', e);
+      return false;
+    }
+  };
+
+  // Clear/delete a chat: removes it for this user (server soft-deletes 1-on-1).
+  const clearChat = async (conversationId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const res = await fetch(`${serverUrl}/api/conversations/${conversationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c._id !== conversationId));
+        setMessages((prev) => { const n = { ...prev }; delete n[conversationId]; return n; });
+      }
+      return res.ok;
+    } catch (e) {
+      console.log('clearChat failed:', e);
+      return false;
+    }
+  };
+
   // REST API: Start or get conversation with user
   const startConversation = async (recipientId: string): Promise<string | null> => {
     if (!token) return null;
@@ -2302,6 +2355,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchConversations,
         loadMessages,
         markConversationRead,
+        blockUser,
+        unblockUser,
+        clearChat,
         sendMessage,
         startConversation,
         createGroup,

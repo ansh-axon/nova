@@ -48,6 +48,35 @@ router.post('/push-token/remove', auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users/block
+// @desc    Block a user (they can no longer message you, nor you them)
+router.post('/block', auth, async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ message: 'userId is required' });
+  if (userId === req.user.id) return res.status(400).json({ message: 'You cannot block yourself' });
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { blockedUsers: userId } });
+    res.json({ message: 'User blocked' });
+  } catch (err) {
+    console.error('[BLOCK] error:', err.message);
+    res.status(500).json({ message: 'Server error blocking user' });
+  }
+});
+
+// @route   POST api/users/unblock
+// @desc    Unblock a previously-blocked user
+router.post('/unblock', auth, async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ message: 'userId is required' });
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $pull: { blockedUsers: userId } });
+    res.json({ message: 'User unblocked' });
+  } catch (err) {
+    console.error('[UNBLOCK] error:', err.message);
+    res.status(500).json({ message: 'Server error unblocking user' });
+  }
+});
+
 // @route   GET api/users/me
 // @desc    Get current user details
 router.get('/me', auth, async (req, res) => {
