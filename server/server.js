@@ -421,7 +421,26 @@ const startServer = async () => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🔐 NOVA secure messaging server`);
+    startSelfKeepAlive();
   });
+};
+
+// Self keep-alive: every ~10 minutes the server pings its own public URL so the
+// Render free tier never hits the 15-minute idle spin-down (avoids the 30-50s
+// cold-start delays). Render automatically provides RENDER_EXTERNAL_URL.
+const startSelfKeepAlive = () => {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
+  if (!selfUrl) {
+    console.log('[KeepAlive] No RENDER_EXTERNAL_URL/SELF_URL set — self keep-alive disabled (local dev).');
+    return;
+  }
+  const TEN_MIN = 10 * 60 * 1000;
+  setInterval(() => {
+    fetch(`${selfUrl}/ping`)
+      .then(() => console.log('[KeepAlive] self-ping ok'))
+      .catch((e) => console.log('[KeepAlive] self-ping failed:', e.message));
+  }, TEN_MIN);
+  console.log(`[KeepAlive] self-ping enabled every 10 min -> ${selfUrl}/ping`);
 };
 
 startServer();
