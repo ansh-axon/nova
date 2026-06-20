@@ -42,7 +42,8 @@ function issueAuth(user) {
       displayName: user.displayName,
       about: user.about,
       avatarUrl: user.avatarUrl,
-      publicKey: user.publicKey
+      publicKey: user.publicKey,
+      blockedUsers: (user.blockedUsers || []).map((b) => b.toString())
     }
   };
 }

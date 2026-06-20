@@ -1560,7 +1560,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       email: data.user.email,
       displayName: data.user.displayName,
       about: data.user.about,
-      avatarUrl: data.user.avatarUrl
+      avatarUrl: data.user.avatarUrl,
+      blockedUsers: Array.isArray(data.user.blockedUsers)
+        ? data.user.blockedUsers.map((b: any) => (typeof b === 'string' ? b : b?._id || b?.id)).filter(Boolean)
+        : [],
     };
     setToken(data.token);
     setUser(formattedUser);
@@ -1929,7 +1932,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ userId }),
       });
       if (res.ok) {
-        setUser((prev) => prev ? { ...prev, blockedUsers: Array.from(new Set([...(prev.blockedUsers || []), userId])) } : prev);
+        setUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, blockedUsers: Array.from(new Set([...(prev.blockedUsers || []), userId])) };
+          AsyncStorage.setItem('user', JSON.stringify(updated)).catch(() => {});
+          return updated;
+        });
       }
       return res.ok;
     } catch (e) {
@@ -1947,7 +1955,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ userId }),
       });
       if (res.ok) {
-        setUser((prev) => prev ? { ...prev, blockedUsers: (prev.blockedUsers || []).filter((id) => id !== userId) } : prev);
+        setUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, blockedUsers: (prev.blockedUsers || []).filter((id) => id !== userId) };
+          AsyncStorage.setItem('user', JSON.stringify(updated)).catch(() => {});
+          return updated;
+        });
       }
       return res.ok;
     } catch (e) {
