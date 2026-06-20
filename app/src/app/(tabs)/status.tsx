@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, Dimensions, StatusBar, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
@@ -9,6 +9,52 @@ import { getCachedMedia, cacheMedia } from '../../utils/mediaCache';
 import { showNeonAlert } from '../../components/NeonAlert';
 
 const { width, height } = Dimensions.get('window');
+
+// MODULE-LEVEL status video player, memoized so the parent's frequent progress
+// re-renders do NOT thrash/re-buffer the video (that was the real stutter cause,
+// even for locally-cached videos). It keeps its own buffering state and only
+// calls the stable onProgress/onFinish callbacks.
+const StatusVideoPlayer = React.memo(({ uri, shouldPlay, onProgress, onFinish }: {
+  uri: string;
+  shouldPlay: boolean;
+  onProgress: (p: number) => void;
+  onFinish: () => void;
+}) => {
+  const [buffering, setBuffering] = useState(true);
+  return (
+    <>
+      <Video
+        source={{ uri }}
+        rate={1.0}
+        volume={1.0}
+        isMuted={false}
+        resizeMode={ResizeMode.CONTAIN}
+        shouldPlay={shouldPlay}
+        isLooping={false}
+        progressUpdateIntervalMillis={500}
+        style={styles.viewerVideo}
+        onLoadStart={() => setBuffering(true)}
+        onPlaybackStatusUpdate={(status: any) => {
+          if (status.isLoaded) {
+            setBuffering(!!status.isBuffering && !status.isPlaying);
+            if (status.durationMillis) {
+              onProgress(Math.min(1, status.positionMillis / status.durationMillis));
+            }
+            if (status.didJustFinish) {
+              onFinish();
+            }
+          }
+        }}
+      />
+      {buffering && (
+        <View style={styles.videoLoadingOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color="#0df" />
+          <Text style={styles.videoLoadingText}>Loading…</Text>
+        </View>
+      )}
+    </>
+  );
+});
 
 export default function StatusScreen() {
   const { user, statuses, fetchStatuses, uploadStatus, uploadFile, serverUrl, markStatusViewed, deleteStatus } = useApp();
@@ -227,6 +273,13 @@ export default function StatusScreen() {
       setSelectedGroup(null); // Auto close if tapped left on first
     }
   };
+
+  // Stable callbacks for the memoized StatusVideoPlayer so it never re-renders
+  // (and never re-buffers) just because the parent re-rendered for progress.
+  const handleNextStoryRef = useRef(handleNextStory);
+  handleNextStoryRef.current = handleNextStory;
+  const onVideoProgress = useCallback((p: number) => setProgress(p), []);
+  const onVideoFinish = useCallback(() => handleNextStoryRef.current?.(), []);
 
   // Delete the currently-viewed status (own status only).
   const handleDeleteCurrentStatus = () => {
@@ -665,35 +718,12 @@ export default function StatusScreen() {
                   : mediaSourceUri;
                 return (
                   <View style={styles.imageViewerWrapper}>
-                    <Video
-                      source={{ uri: videoSourceUri }}
-                      rate={1.0}
-                      volume={1.0}
-                      isMuted={false}
-                      resizeMode={ResizeMode.CONTAIN}
+                    <StatusVideoPlayer
+                      uri={videoSourceUri}
                       shouldPlay={selectedGroup !== null}
-                      isLooping={false}
-                      progressUpdateIntervalMillis={250}
-                      style={styles.viewerVideo}
-                      onLoadStart={() => setVideoBuffering(true)}
-                      onPlaybackStatusUpdate={(status: any) => {
-                        if (status.isLoaded) {
-                          setVideoBuffering(!!status.isBuffering && !status.isPlaying);
-                          if (status.durationMillis) {
-                            setProgress(Math.min(1, status.positionMillis / status.durationMillis));
-                          }
-                          if (status.didJustFinish) {
-                            handleNextStory();
-                          }
-                        }
-                      }}
+                      onProgress={onVideoProgress}
+                      onFinish={onVideoFinish}
                     />
-                    {videoBuffering && (
-                      <View style={styles.videoLoadingOverlay} pointerEvents="none">
-                        <ActivityIndicator size="large" color="#0df" />
-                        <Text style={styles.videoLoadingText}>Loading…</Text>
-                      </View>
-                    )}
                     {currentStory.textContent && (
                       <View style={styles.imageTextCaptionBg}>
                         <Text style={styles.imageTextCaption}>{currentStory.textContent}</Text>
