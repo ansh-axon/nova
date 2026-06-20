@@ -190,7 +190,8 @@ export default function ChatScreen() {
     setCallState, 
     setCallDuration, 
     setActiveCall,
-    markConversationRead
+    markConversationRead,
+    setActiveConversationId
   } = useApp();
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -239,6 +240,8 @@ export default function ChatScreen() {
   // Load message history on focus
   useEffect(() => {
     if (!conversationId) return;
+    // Mark this chat active so incoming messages here don't bump the unread badge.
+    setActiveConversationId(conversationId);
     const fetchChatData = async () => {
       await loadMessages(conversationId);
       setLoading(false);
@@ -247,6 +250,7 @@ export default function ChatScreen() {
       markConversationRead(conversationId);
     };
     fetchChatData();
+    return () => setActiveConversationId(null);
   }, [conversationId]);
 
   // Listen for socket typing events and automatic scrolls

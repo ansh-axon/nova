@@ -244,6 +244,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Refs mirror latest values so the (once-bound) socket handlers never read stale state.
   const customTonesRef = useRef(customTones);
   useEffect(() => { customTonesRef.current = customTones; }, [customTones]);
+  // Tracks which chat is currently open so we don't count its messages as unread.
+  const activeConversationIdRef = useRef<string | null>(null);
+  useEffect(() => { activeConversationIdRef.current = activeConversationId; }, [activeConversationId]);
   const conversationsRef = useRef<Conversation[]>([]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
@@ -1121,10 +1124,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         const updatedConvs = [...prevConvs];
+        const isActiveChat = activeConversationIdRef.current === convId;
         updatedConvs[index] = {
           ...updatedConvs[index],
           lastMessage: newMessage,
-          updatedAt: newMessage.createdAt
+          updatedAt: newMessage.createdAt,
+          // Bump the unread badge unless the user is currently viewing this chat.
+          unreadCount: isActiveChat ? 0 : ((updatedConvs[index].unreadCount || 0) + 1),
         };
         // Sort conversations by updated date (newest first)
         return updatedConvs.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -1892,6 +1898,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // REST API: Mark all incoming messages in a conversation as read (drives double-tick)
   const markConversationRead = async (conversationId: string): Promise<void> => {
     if (!token || !conversationId) return;
+    // Optimistically clear the unread badge for this chat immediately on open.
+    setConversations((prev) => prev.map((c) =>
+      c._id === conversationId ? { ...c, unreadCount: 0 } : c
+    ));
     try {
       await fetch(`${serverUrl}/api/messages/conversation/${conversationId}/read-all`, {
         method: 'PUT',
