@@ -1039,9 +1039,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!token || !user) return;
     let cancelled = false;
-    (async () => {
-      const fcmToken = await registerForFcm();
-      if (cancelled || !fcmToken) return;
+
+    const uploadToken = async (fcmToken: string) => {
       fcmTokenRef.current = fcmToken;
       try {
         await fetch(`${serverUrl}/api/users/fcm-token`, {
@@ -1052,7 +1051,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) {
         console.warn('[FCM] token upload failed:', e);
       }
+    };
+
+    (async () => {
+      // Try a few times — on a fresh install the native FCM layer may take a
+      // moment to be ready right after login.
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        const fcmToken = await registerForFcm();
+        if (cancelled) return;
+        if (fcmToken) {
+          await uploadToken(fcmToken);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     })();
+
+    // If FCM rotates the device token, re-upload it.
+    const unsubToken = messaging().onTokenRefresh(async (newToken: string) => {
+      if (!cancelled && newToken) await uploadToken(newToken);
+    });
 
     // Foreground data messages: the socket already drives the in-app call UI,
     // so here we only dismiss a full-screen notification if the call cancelled.
@@ -1061,7 +1079,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.type === 'cancel_call') await cancelIncomingCall();
     });
 
-    return () => { cancelled = true; unsub(); };
+    return () => { cancelled = true; unsub(); unsubToken(); };
   }, [token, user]);
 
   // Reconcile a call that arrived while the app was closed: when the app opens

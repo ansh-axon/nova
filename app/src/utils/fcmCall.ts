@@ -29,12 +29,26 @@ export async function ensureCallChannel(): Promise<void> {
 // Asks for notification permission and returns the device FCM token (or null).
 export async function registerForFcm(): Promise<string | null> {
   try {
+    if (Platform.OS === 'android') {
+      // Request the Android 13+ runtime notification permission via notifee
+      // (this reliably shows the POST_NOTIFICATIONS dialog). We need it to
+      // DISPLAY the call notification — but NOT to obtain the FCM token.
+      try { await notifee.requestPermission(); } catch (e) {}
+      await ensureCallChannel();
+      // The FCM token does not depend on the notification permission on
+      // Android, so fetch it regardless of the dialog outcome.
+      try { await messaging().registerDeviceForRemoteMessages(); } catch (e) {}
+      const token = await messaging().getToken();
+      return token || null;
+    }
+
+    // iOS: a granted permission is required before a token is issued.
     const authStatus = await messaging().requestPermission();
     const enabled =
       authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === messaging.AuthorizationStatus.PROVISIONAL;
     if (!enabled) return null;
-    await ensureCallChannel();
+    await messaging().registerDeviceForRemoteMessages();
     const token = await messaging().getToken();
     return token || null;
   } catch (e) {
