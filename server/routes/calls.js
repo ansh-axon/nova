@@ -6,6 +6,7 @@ const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const { v4: uuidv4 } = require('uuid');
 const { sendPush } = require('../utils/push');
+const { sendData } = require('../utils/fcmAdmin');
 
 // @route   GET api/calls/history
 // @desc    Get call history for the authenticated user
@@ -72,11 +73,31 @@ router.post('/initiate', auth, async (req, res) => {
 
     res.json(populatedCall);
 
-    // ── Push notification for the incoming call (offline/backgrounded) ──
+    const callerName = populatedCall.caller.displayName || populatedCall.caller.username || 'Someone';
+
+    // ── FCM data message → full-screen incoming call even when app is closed ──
+    (async () => {
+      try {
+        if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
+          await sendData(recipient.fcmTokens, {
+            type: 'incoming_call',
+            callId: call._id.toString(),
+            callRoomId,
+            callType,
+            callerName,
+            callerId: req.user.id,
+            conversationId: conversationId || '',
+          });
+        }
+      } catch (e) {
+        console.error('[FCM] call data message failed:', e.message);
+      }
+    })();
+
+    // ── Expo push fallback alert (in case FCM/notifee path isn't available) ──
     (async () => {
       try {
         if (Array.isArray(recipient.pushTokens) && recipient.pushTokens.length > 0) {
-          const callerName = populatedCall.caller.displayName || populatedCall.caller.username || 'Someone';
           await sendPush(recipient.pushTokens, {
             title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
             body: `${callerName} is calling you on NOVA`,
@@ -182,6 +203,16 @@ router.put('/:callId/reject', auth, async (req, res) => {
     }
 
     res.json(populatedCall);
+
+    // Dismiss any full-screen incoming-call screen on the receiver's device.
+    (async () => {
+      try {
+        const receiver = await User.findById(call.receiver).select('fcmTokens');
+        if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
+          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+        }
+      } catch (e) { /* ignore */ }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error rejecting call' });
@@ -225,6 +256,17 @@ router.put('/:callId/end', auth, async (req, res) => {
     req.io.to(`user_${call.receiver.toString()}`).emit('call_ended', populatedCall);
 
     res.json(populatedCall);
+
+    // Dismiss any full-screen incoming-call screen on the receiver's device
+    // (covers the caller cancelling before the receiver answered).
+    (async () => {
+      try {
+        const receiver = await User.findById(call.receiver).select('fcmTokens');
+        if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
+          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+        }
+      } catch (e) { /* ignore */ }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error ending call' });

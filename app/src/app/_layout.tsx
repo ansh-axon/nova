@@ -12,6 +12,11 @@ import { CameraView } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import GroupCallHost from '../components/GroupCallHost';
 import UnlockScreen from '../components/UnlockScreen';
+import { registerCallBackgroundHandlers } from '../utils/fcmCall';
+
+// Register FCM + notifee background handlers once, at module load, so incoming
+// calls can wake the app and show a full-screen call screen even when killed.
+registerCallBackgroundHandlers();
 
 const { width } = Dimensions.get('window');
 

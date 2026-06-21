@@ -70,6 +70,11 @@ const UserSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  // Native FCM device tokens (used for data-message based incoming-call alerts)
+  fcmTokens: {
+    type: [String],
+    default: []
+  },
   // Users this user has blocked (they can't message each other)
   blockedUsers: {
     type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

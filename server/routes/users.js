@@ -17,6 +17,36 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users/fcm-token
+// @desc    Register a native FCM device token (for incoming-call data messages)
+router.post('/fcm-token', auth, async (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: 'A valid FCM token is required' });
+  }
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { fcmTokens: token.trim() } });
+    res.json({ message: 'FCM token registered' });
+  } catch (err) {
+    console.error('[FCM] register token error:', err.message);
+    res.status(500).json({ message: 'Server error registering FCM token' });
+  }
+});
+
+// @route   POST api/users/fcm-token/remove
+// @desc    Remove a native FCM device token (called on logout)
+router.post('/fcm-token/remove', auth, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.json({ message: 'Nothing to remove' });
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $pull: { fcmTokens: token.trim() } });
+    res.json({ message: 'FCM token removed' });
+  } catch (err) {
+    console.error('[FCM] remove token error:', err.message);
+    res.status(500).json({ message: 'Server error removing FCM token' });
+  }
+});
+
 // @route   POST api/users/push-token
 // @desc    Register an Expo push token for the authenticated user's device
 router.post('/push-token', auth, async (req, res) => {

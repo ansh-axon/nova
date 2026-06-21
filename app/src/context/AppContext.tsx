@@ -14,6 +14,8 @@ import {
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
+import messaging from '@react-native-firebase/messaging';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -1032,6 +1034,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => sub.remove();
   }, []);
 
+  // ── Native FCM (full-screen incoming-call data messages) ──
+  const fcmTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+    (async () => {
+      const fcmToken = await registerForFcm();
+      if (cancelled || !fcmToken) return;
+      fcmTokenRef.current = fcmToken;
+      try {
+        await fetch(`${serverUrl}/api/users/fcm-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ token: fcmToken }),
+        });
+      } catch (e) {
+        console.warn('[FCM] token upload failed:', e);
+      }
+    })();
+
+    // Foreground data messages: the socket already drives the in-app call UI,
+    // so here we only dismiss a full-screen notification if the call cancelled.
+    const unsub = messaging().onMessage(async (rm: any) => {
+      const data: any = rm?.data || {};
+      if (data.type === 'cancel_call') await cancelIncomingCall();
+    });
+
+    return () => { cancelled = true; unsub(); };
+  }, [token, user]);
+
+  // Reconcile a call that arrived while the app was closed: when the app opens
+  // (or returns to foreground), act on the pending full-screen notification.
+  const reconcilePendingCall = useCallback(async () => {
+    try {
+      const data = await getPendingCall();
+      if (!data || data.type !== 'incoming_call' || !data.callId) return;
+      await clearPendingCall();
+      await cancelIncomingCall();
+      if (data._action === 'reject') {
+        rejectCall(data.callId);
+        return;
+      }
+      // Show the in-app incoming-call UI so the WebRTC handshake can proceed.
+      const callObj: any = {
+        _id: data.callId,
+        callRoomId: data.callRoomId,
+        callType: data.callType === 'video' ? 'video' : 'voice',
+        caller: { _id: data.callerId, id: data.callerId, displayName: data.callerName, username: data.callerName, avatarUrl: '' },
+        receiver: user,
+        status: 'ringing',
+      };
+      setIncomingCall(callObj);
+      setCallState('ringing');
+      if (data._action === 'accept') {
+        acceptCall(data.callId);
+      }
+    } catch (e) {
+      console.warn('[FCM] reconcile pending call failed:', e);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    reconcilePendingCall();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') reconcilePendingCall();
+    });
+    return () => sub.remove();
+  }, [token, user, reconcilePendingCall]);
+
+
   // Initialize and manage Socket.io connection
   useEffect(() => {
     if (!token || !user) {
@@ -1729,6 +1802,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       } catch (e) { /* ignore */ }
       pushTokenRef.current = null;
+    }
+    // Also unregister the native FCM token (incoming-call alerts).
+    if (fcmTokenRef.current && token) {
+      try {
+        await fetch(`${serverUrl}/api/users/fcm-token/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ token: fcmTokenRef.current }),
+        });
+      } catch (e) { /* ignore */ }
+      fcmTokenRef.current = null;
     }
 
     if (socket) {
