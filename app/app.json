@@ -88,7 +88,8 @@
             "./assets/tones/ring_call.wav"
           ]
         }
-      ]
+      ],
+      "@react-native-firebase/app"
     ],
     "experiments": {
       "typedRoutes": true
