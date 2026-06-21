@@ -22,7 +22,7 @@ export async function ensureCallChannel(): Promise<void> {
     importance: AndroidImportance.HIGH,
     sound: 'ring_call',
     vibration: true,
-    vibrationPattern: [0, 1000, 800, 1000, 800, 1000],
+    vibrationPattern: [400, 1000, 400, 1000],
   });
 }
 
