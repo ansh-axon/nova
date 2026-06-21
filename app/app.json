@@ -82,7 +82,6 @@
       [
         "expo-notifications",
         {
-          "color": "#00ddff",
           "sounds": [
             "./assets/tones/notif_message.wav",
             "./assets/tones/ring_call.wav"
