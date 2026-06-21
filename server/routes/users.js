@@ -17,6 +17,14 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users/fcm-debug
+// @desc    Receive a client FCM-registration diagnostic string (for debugging)
+router.post('/fcm-debug', auth, (req, res) => {
+  const detail = String(req.body?.detail || '').slice(0, 400);
+  console.log(`[FCM-DEBUG] user ${req.user.id}: ${detail}`);
+  res.json({ ok: true });
+});
+
 // @route   POST api/users/fcm-token
 // @desc    Register a native FCM device token (for incoming-call data messages)
 router.post('/fcm-token', auth, async (req, res) => {

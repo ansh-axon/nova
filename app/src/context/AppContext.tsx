@@ -1057,10 +1057,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Try a few times — on a fresh install the native FCM layer may take a
       // moment to be ready right after login.
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
-        const fcmToken = await registerForFcm();
+        const res = await registerForFcm();
         if (cancelled) return;
-        if (fcmToken) {
-          await uploadToken(fcmToken);
+        // Report the step-by-step outcome to the server so the failure point
+        // is visible in logs (device logcat is not otherwise reachable).
+        try {
+          await fetch(`${serverUrl}/api/users/fcm-debug`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ detail: `attempt${attempt}:${res.detail}` }),
+          });
+        } catch (e) {}
+        if (res.token) {
+          await uploadToken(res.token);
           return;
         }
         await new Promise((r) => setTimeout(r, 2000));

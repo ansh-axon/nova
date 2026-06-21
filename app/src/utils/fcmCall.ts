@@ -26,20 +26,34 @@ export async function ensureCallChannel(): Promise<void> {
   });
 }
 
-// Asks for notification permission and returns the device FCM token (or null).
-export async function registerForFcm(): Promise<string | null> {
+// Asks for notification permission and returns the device FCM token (or null),
+// along with a short diagnostic string describing each step's outcome (so the
+// failure point is visible in server logs without needing device logcat).
+export type FcmRegisterResult = { token: string | null; detail: string };
+
+export async function registerForFcm(): Promise<FcmRegisterResult> {
+  const steps: string[] = [];
   try {
     if (Platform.OS === 'android') {
-      // Request the Android 13+ runtime notification permission via notifee
-      // (this reliably shows the POST_NOTIFICATIONS dialog). We need it to
-      // DISPLAY the call notification — but NOT to obtain the FCM token.
-      try { await notifee.requestPermission(); } catch (e) {}
-      await ensureCallChannel();
-      // The FCM token does not depend on the notification permission on
-      // Android, so fetch it regardless of the dialog outcome.
-      try { await messaging().registerDeviceForRemoteMessages(); } catch (e) {}
-      const token = await messaging().getToken();
-      return token || null;
+      try {
+        const p = await notifee.requestPermission();
+        steps.push('perm=' + String((p as any)?.authorizationStatus));
+      } catch (e: any) { steps.push('permErr=' + (e?.message || e)); }
+
+      try { await ensureCallChannel(); steps.push('channel=ok'); }
+      catch (e: any) { steps.push('channelErr=' + (e?.message || e)); }
+
+      try { await messaging().registerDeviceForRemoteMessages(); steps.push('reg=ok'); }
+      catch (e: any) { steps.push('regErr=' + (e?.message || e)); }
+
+      try {
+        const token = await messaging().getToken();
+        steps.push('token=' + (token ? '…' + token.slice(-8) : 'EMPTY'));
+        return { token: token || null, detail: steps.join('|') };
+      } catch (e: any) {
+        steps.push('getTokenErr=' + (e?.message || e));
+        return { token: null, detail: steps.join('|') };
+      }
     }
 
     // iOS: a granted permission is required before a token is issued.
@@ -47,13 +61,15 @@ export async function registerForFcm(): Promise<string | null> {
     const enabled =
       authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-    if (!enabled) return null;
+    steps.push('iosPerm=' + String(authStatus));
+    if (!enabled) return { token: null, detail: steps.join('|') };
     await messaging().registerDeviceForRemoteMessages();
     const token = await messaging().getToken();
-    return token || null;
-  } catch (e) {
-    console.warn('[FCM] registerForFcm failed:', (e as any)?.message || e);
-    return null;
+    steps.push('token=' + (token ? '…' + token.slice(-8) : 'EMPTY'));
+    return { token: token || null, detail: steps.join('|') };
+  } catch (e: any) {
+    steps.push('fatal=' + (e?.message || e));
+    return { token: null, detail: steps.join('|') };
   }
 }
 
