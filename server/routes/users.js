@@ -26,6 +26,7 @@ router.post('/fcm-token', auth, async (req, res) => {
   }
   try {
     await User.findByIdAndUpdate(req.user.id, { $addToSet: { fcmTokens: token.trim() } });
+    console.log(`[FCM] token registered for user ${req.user.id} (…${token.trim().slice(-8)})`);
     res.json({ message: 'FCM token registered' });
   } catch (err) {
     console.error('[FCM] register token error:', err.message);

@@ -78,6 +78,8 @@ router.post('/initiate', auth, async (req, res) => {
     // ── FCM data message → full-screen incoming call even when app is closed ──
     (async () => {
       try {
+        const tokCount = Array.isArray(recipient.fcmTokens) ? recipient.fcmTokens.length : 0;
+        console.log(`[FCM] call initiate → recipient ${recipientId} has ${tokCount} fcmToken(s)`);
         if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
           await sendData(recipient.fcmTokens, {
             type: 'incoming_call',
