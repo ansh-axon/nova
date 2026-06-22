@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Happy Birthday Poonam ❤️</title>
+<style>
+  :root{
+    --pink:#ff4d8d;
+    --pink2:#ff8fb1;
+    --gold:#ffd86b;
+    --bg1:#1a0820;
+    --bg2:#2a0a3a;
+    --bg3:#3a0f2e;
+    --text:#fff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;background:#0c0410;color:var(--text);}
+
+  /* Animated romantic gradient background */
+  .bg{
+    position:fixed;inset:0;z-index:0;
+    background:linear-gradient(-45deg,var(--bg1),var(--bg2),var(--bg3),#120618);
+    background-size:400% 400%;
+    animation:grad 16s ease infinite;
+  }
+  @keyframes grad{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+  /* ---------- Intro gate ---------- */
+  #gate{
+    position:fixed;inset:0;z-index:50;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 40%,#2a0a3a,#0c0410 70%);
+    cursor:pointer;text-align:center;padding:24px;
+    transition:opacity .8s ease, visibility .8s ease;
+  }
+  #gate.hide{opacity:0;visibility:hidden;}
+  .gate-heart{font-size:90px;animation:beat 1.1s ease-in-out infinite;filter:drop-shadow(0 0 24px var(--pink));}
+  @keyframes beat{0%,100%{transform:scale(1)}15%{transform:scale(1.18)}30%{transform:scale(1)}45%{transform:scale(1.12)}}
+  .gate-text{margin-top:26px;font-size:20px;letter-spacing:1px;color:#ffd6e6;opacity:.92}
+  .gate-sub{margin-top:10px;font-size:13px;color:#b98fc9;animation:pulseo 2s infinite}
+  @keyframes pulseo{0%,100%{opacity:.4}50%{opacity:1}}
+
+  /* ---------- Main scene ---------- */
+  #scene{position:relative;z-index:10;height:100%;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;padding:28px;opacity:0;transition:opacity 1s ease .2s;}
+  #scene.show{opacity:1;}
+
+  .greeting{font-size:15px;letter-spacing:4px;text-transform:uppercase;color:var(--gold);opacity:.9;margin-bottom:6px;}
+  .title{
+    font-size:clamp(34px,11vw,68px);font-weight:800;line-height:1.05;
+    background:linear-gradient(90deg,#ff8fb1,#ffd86b,#ff4d8d,#ff8fb1);
+    background-size:300% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:shine 5s linear infinite;filter:drop-shadow(0 2px 18px rgba(255,77,141,.45));
+  }
+  @keyframes shine{to{background-position:300% center}}
+  .name{
+    font-size:clamp(40px,15vw,92px);font-weight:900;margin-top:4px;
+    color:#fff;text-shadow:0 0 18px var(--pink),0 0 40px rgba(255,77,141,.6);
+    animation:floaty 4s ease-in-out infinite;
+  }
+  @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+
+  /* Photo frame */
+  .frame{
+    margin:26px auto 0;width:150px;height:150px;border-radius:50%;
+    padding:5px;background:linear-gradient(135deg,var(--pink),var(--gold));
+    box-shadow:0 0 30px rgba(255,77,141,.55);animation:floaty 5s ease-in-out infinite;
+  }
+  .frame img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;background:#2a0a3a;}
+  .frame .ph{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:#2a0a3a;font-size:54px;}
+
+  .msg{margin-top:24px;max-width:560px;font-size:clamp(15px,4.2vw,19px);line-height:1.7;color:#ffe9f1;min-height:80px;}
+  .cursor{display:inline-block;width:2px;height:1.05em;background:var(--pink2);margin-left:2px;
+    vertical-align:-2px;animation:blink .8s steps(1) infinite;}
+  @keyframes blink{50%{opacity:0}}
+
+  .btn{
+    margin-top:30px;border:none;cursor:pointer;
+    padding:15px 30px;border-radius:40px;font-size:16px;font-weight:700;letter-spacing:.5px;color:#3a0f2e;
+    background:linear-gradient(135deg,var(--gold),var(--pink2));
+    box-shadow:0 8px 26px rgba(255,77,141,.45);transition:transform .15s ease;
+  }
+  .btn:active{transform:scale(.94)}
+  .sign{margin-top:24px;font-size:14px;color:#caa0d8;letter-spacing:1px;}
+  .sign b{color:#ffd86b;}
+
+  /* ---------- Love note modal ---------- */
+  #note{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+    background:rgba(8,3,14,.78);backdrop-filter:blur(6px);padding:24px;}
+  #note.show{display:flex;animation:fadein .4s ease;}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  .card{max-width:440px;width:100%;background:linear-gradient(160deg,#2a0a3a,#1a0820);
+    border:1px solid rgba(255,143,177,.35);border-radius:22px;padding:30px 26px;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);transform:translateY(20px);animation:rise .5s ease forwards;}
+  @keyframes rise{to{transform:translateY(0)}}
+  .card h2{font-size:22px;color:var(--gold);margin-bottom:14px;}
+  .card p{font-size:15.5px;line-height:1.8;color:#ffe9f1;white-space:pre-line;}
+  .card .close{margin-top:22px;width:100%;}
+
+  /* Falling hearts + balloons live in their own layers */
+  .layer{position:fixed;inset:0;z-index:5;pointer-events:none;overflow:hidden;}
+  .heart,.balloon{position:absolute;will-change:transform;}
+  .confetti{position:fixed;top:-20px;z-index:40;pointer-events:none;will-change:transform;border-radius:2px;}
+  .mutebtn{position:fixed;top:14px;right:14px;z-index:70;background:rgba(255,255,255,.12);
+    border:none;color:#fff;width:42px;height:42px;border-radius:50%;font-size:18px;cursor:pointer;backdrop-filter:blur(4px);}
+</style>
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="layer" id="hearts"></div>
+  <div class="layer" id="balloons"></div>
+
+  <!-- Intro gate -->
+  <div id="gate">
+    <div class="gate-heart">💝</div>
+    <div class="gate-text">A little surprise for someone special...</div>
+    <div class="gate-sub">tap anywhere to open</div>
+  </div>
+
+  <!-- Main scene -->
+  <div id="scene">
+    <div class="greeting">Happy Birthday</div>
+    <div class="title">Happy Birthday</div>
+    <div class="name" id="theName">Poonam</div>
+
+    <div class="frame">
+      <!-- Replace src below with her photo URL/file to show her picture -->
+      <div class="ph" id="photo">👑</div>
+    </div>
+
+    <div class="msg"><span id="typed"></span><span class="cursor"></span></div>
+
+    <button class="btn" id="openNote">💌 A message for you</button>
+    <div class="sign">with all my love, <b id="fromName">— Your Love</b></div>
+  </div>
+
+  <!-- Love note -->
+  <div id="note">
+    <div class="card">
+      <h2>For my Poonam 🌹</h2>
+      <p id="noteText"></p>
+      <button class="btn close" id="closeNote">Close ❤️</button>
+    </div>
+  </div>
+
+  <button class="mutebtn" id="mute" title="music">🔇</button>
+
+<script>
+/* ============================================================
+   EDIT THESE  ↓↓↓  (sirf yahan badlo — naam, message, photo, music)
+   ============================================================ */
+var HER_NAME   = "Poonam";
+var FROM_NAME  = "— Your Love";          // apna naam daal sakte ho
+var PHOTO_URL  = "";                      // her photo ka link/file. khali = crown emoji
+var MUSIC_URL  = "";                      // gaane ka mp3 link (optional)
+
+// Scene pe type hone wala message:
+var TYPED_MESSAGE =
+  "Duniya ke saare khoobsurat lamhe aaj tumhare naam hain... " +
+  "kyunki aaj wo din hai jab meri sabse pyari muskurahat is duniya me aayi thi. ❤️";
+
+// 💌 button pe khulne wala lamba love note:
+var LOVE_NOTE =
+  "Meri Poonam,\n\n" +
+  "Janamdin mubarak ho, meri jaan. 🎂\n\n" +
+  "Jab se tum meri zindagi me aayi ho, har din thoda aur khoobsurat ho gaya hai. " +
+  "Tumhari hansi meri sabse pasandida awaaz hai, aur tumhara saath meri sabse badi taqat.\n\n" +
+  "Main shayad har baar keh na paaun, par sach ye hai — tum meri zindagi ka sabse khoobsurat hissa ho. " +
+  "Tumhari aankhon me main apni puri duniya dekh leta hoon.\n\n" +
+  "Is saal tumhare chehre pe ye muskaan kabhi kam na ho, " +
+  "tumhare saare sapne poore hon, aur main har khushi-har gham me tumhare saath rahun — hamesha.\n\n" +
+  "Tum jaisi ho, bilkul waisi hi perfect ho. Kabhi mat badalna. 🌹\n\n" +
+  "I love you, today and always.\n" +
+  FROM_NAME;
+/* ============================================================
+   (niche kuch change karne ki zarurat nahi)
+   ============================================================ */
+
+document.getElementById('theName').textContent = HER_NAME;
+document.getElementById('fromName').textContent = FROM_NAME;
+document.getElementById('noteText').textContent = LOVE_NOTE;
+document.title = "Happy Birthday " + HER_NAME + " ❤️";
+
+if (PHOTO_URL) {
+  var f = document.querySelector('.frame');
+  f.innerHTML = '<img src="' + PHOTO_URL + '" alt="' + HER_NAME + '">';
+}
+
+var audio = null;
+if (MUSIC_URL) { audio = new Audio(MUSIC_URL); audio.loop = true; audio.volume = 0.6; }
+
+var COLORS = ['#ff4d8d','#ffd86b','#ff8fb1','#ffffff','#c77dff','#ff9e64'];
+
+/* ---------- Floating hearts ---------- */
+function spawnHeart(){
+  var h = document.createElement('div');
+  h.className = 'heart';
+  h.textContent = ['❤️','💖','💕','💗','🩷'][Math.floor(Math.random()*5)];
+  var size = 14 + Math.random()*26;
+  h.style.fontSize = size + 'px';
+  h.style.left = Math.random()*100 + 'vw';
+  h.style.bottom = '-40px';
+  h.style.opacity = 0.5 + Math.random()*0.5;
+  document.getElementById('hearts').appendChild(h);
+  var dur = 6000 + Math.random()*6000;
+  var drift = (Math.random()*120 - 60);
+  h.animate([
+    {transform:'translate(0,0) rotate(0deg)'},
+    {transform:'translate('+drift+'px,-110vh) rotate('+(drift)+'deg)'}
+  ],{duration:dur,easing:'ease-in'});
+  setTimeout(function(){h.remove();}, dur);
+}
+
+/* ---------- Balloons ---------- */
+function spawnBalloon(){
+  var b = document.createElement('div');
+  b.className = 'balloon';
+  var c = COLORS[Math.floor(Math.random()*COLORS.length)];
+  var w = 34 + Math.random()*26;
+  b.innerHTML = '<svg width="'+w+'" height="'+(w*1.3)+'" viewBox="0 0 40 52">' +
+    '<ellipse cx="20" cy="20" rx="18" ry="20" fill="'+c+'"/>' +
+    '<path d="M20 40 L17 46 L23 46 Z" fill="'+c+'"/>' +
+    '<line x1="20" y1="46" x2="20" y2="52" stroke="rgba(255,255,255,.5)" stroke-width="1"/></svg>';
+  b.style.left = Math.random()*100 + 'vw';
+  b.style.bottom = '-70px';
+  b.style.opacity = 0.85;
+  document.getElementById('balloons').appendChild(b);
+  var dur = 9000 + Math.random()*7000;
+  var drift = (Math.random()*100 - 50);
+  b.animate([
+    {transform:'translate(0,0)'},
+    {transform:'translate('+drift+'px,-120vh)'}
+  ],{duration:dur,easing:'ease-in'});
+  setTimeout(function(){b.remove();}, dur);
+}
+
+/* ---------- Confetti burst ---------- */
+function burstConfetti(n){
+  n = n || 80;
+  for (var i=0;i<n;i++){
+    var c = document.createElement('div');
+    c.className = 'confetti';
+    var size = 6 + Math.random()*8;
+    c.style.width = size+'px';
+    c.style.height = (size*0.5)+'px';
+    c.style.background = COLORS[Math.floor(Math.random()*COLORS.length)];
+    c.style.left = Math.random()*100 + 'vw';
+    document.body.appendChild(c);
+    var dur = 2200 + Math.random()*2600;
+    var drift = (Math.random()*240 - 120);
+    var rot = Math.random()*720;
+    c.animate([
+      {transform:'translate(0,-20px) rotate(0deg)',opacity:1},
+      {transform:'translate('+drift+'px,105vh) rotate('+rot+'deg)',opacity:.9}
+    ],{duration:dur,easing:'cubic-bezier(.3,.6,.6,1)'});
+    setTimeout((function(el){return function(){el.remove();};})(c), dur);
+  }
+}
+
+/* ---------- Typewriter ---------- */
+function typeMessage(text, el, speed){
+  var i = 0;
+  (function step(){
+    if (i <= text.length){
+      el.textContent = text.slice(0,i);
+      i++;
+      setTimeout(step, speed);
+    }
+  })();
+}
+
+/* ---------- Ambient loops ---------- */
+setInterval(spawnHeart, 650);
+setInterval(spawnBalloon, 1700);
+
+/* ---------- Open the surprise ---------- */
+var opened = false;
+function openSurprise(){
+  if (opened) return; opened = true;
+  document.getElementById('gate').classList.add('hide');
+  document.getElementById('scene').classList.add('show');
+  burstConfetti(120);
+  setTimeout(function(){ burstConfetti(60); }, 700);
+  setTimeout(function(){ typeMessage(TYPED_MESSAGE, document.getElementById('typed'), 45); }, 900);
+  if (audio){ audio.play().then(function(){updateMute();}).catch(function(){}); }
+}
+document.getElementById('gate').addEventListener('click', openSurprise);
+
+/* ---------- Love note ---------- */
+document.getElementById('openNote').addEventListener('click', function(){
+  document.getElementById('note').classList.add('show');
+  burstConfetti(50);
+});
+document.getElementById('closeNote').addEventListener('click', function(){
+  document.getElementById('note').classList.remove('show');
+});
+
+/* ---------- Mute toggle ---------- */
+function updateMute(){
+  var m = document.getElementById('mute');
+  if (!audio){ m.style.display='none'; return; }
+  m.textContent = audio.paused ? '🔇' : '🔊';
+}
+document.getElementById('mute').addEventListener('click', function(){
+  if (!audio) return;
+  if (audio.paused) audio.play(); else audio.pause();
+  updateMute();
+});
+updateMute();
+</script>
+</body>
+</html>

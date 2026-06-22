@@ -361,6 +361,11 @@ app.get('/ping', (req, res) => {
   res.status(200).json({ ok: true, ts: Date.now() });
 });
 
+// 🎂 Birthday surprise page → https://<server>/birthday
+app.get('/birthday', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'birthday.html'));
+});
+
 // Simple index status route
 app.get('/', (req, res) => {
   res.json({ 
