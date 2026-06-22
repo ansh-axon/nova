@@ -15,7 +15,7 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
-import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall } from '../utils/fcmCall';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, isBatteryOptimized, openBatteryOptimizationSettings, openPowerManagerSettings } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -1036,6 +1036,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Native FCM (full-screen incoming-call data messages) ──
   const fcmTokenRef = useRef<string | null>(null);
+
+  // Shows a one-time popup asking the user to exempt NOVA from battery
+  // optimization (and enable Autostart on OEM ROMs). Without this, a fully
+  // closed app won't receive the incoming-call wake-up on phones like
+  // Infinix/Oppo/Xiaomi. Tapping a button opens the relevant system screen.
+  const maybePromptBatteryOptimization = useCallback(async () => {
+    try {
+      const optimized = await isBatteryOptimized();
+      if (!optimized) return; // already exempt — nothing to do
+      const shown = await AsyncStorage.getItem('battery_opt_prompt_v1');
+      if (shown === 'done') return; // don't nag every login
+
+      showNeonAlert({
+        title: 'ALLOW CALLS WHEN CLOSED',
+        message:
+          'To receive calls even when NOVA is closed, allow it to run in the background.\n\n1) Tap "Allow" and choose "Don\'t optimize" / "No restrictions".\n2) Then enable "Autostart" for NOVA in your phone settings.',
+        icon: 'battery-charging-outline',
+        borderColor: '#00ddff',
+        iconColor: '#00ddff',
+        buttons: [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Autostart',
+            onPress: () => { openPowerManagerSettings(); },
+          },
+          {
+            text: 'Allow',
+            style: 'default',
+            onPress: async () => {
+              await AsyncStorage.setItem('battery_opt_prompt_v1', 'done');
+              openBatteryOptimizationSettings();
+            },
+          },
+        ],
+      });
+    } catch (e) { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     if (!token || !user) return;
     let cancelled = false;
@@ -1070,6 +1108,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (e) {}
         if (res.token) {
           await uploadToken(res.token);
+          // One-time nudge to exempt the app from battery optimization so
+          // incoming calls can wake it even when fully closed (required on
+          // aggressive OEM ROMs like Infinix/Oppo/Xiaomi).
+          maybePromptBatteryOptimization();
           return;
         }
         await new Promise((r) => setTimeout(r, 2000));

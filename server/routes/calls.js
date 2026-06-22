@@ -81,7 +81,7 @@ router.post('/initiate', auth, async (req, res) => {
         const tokCount = Array.isArray(recipient.fcmTokens) ? recipient.fcmTokens.length : 0;
         console.log(`[FCM] call initiate → recipient ${recipientId} has ${tokCount} fcmToken(s)`);
         if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
-          await sendData(recipient.fcmTokens, {
+          const invalidTokens = await sendData(recipient.fcmTokens, {
             type: 'incoming_call',
             callId: call._id.toString(),
             callRoomId,
@@ -90,6 +90,11 @@ router.post('/initiate', auth, async (req, res) => {
             callerId: req.user.id,
             conversationId: conversationId || '',
           });
+          // Prune tokens FCM reported as permanently invalid (e.g. reinstalled app).
+          if (Array.isArray(invalidTokens) && invalidTokens.length > 0) {
+            await User.findByIdAndUpdate(recipientId, { $pull: { fcmTokens: { $in: invalidTokens } } });
+            console.log(`[FCM] pruned ${invalidTokens.length} stale token(s) for ${recipientId}`);
+          }
         }
       } catch (e) {
         console.error('[FCM] call data message failed:', e.message);

@@ -110,6 +110,26 @@ export async function cancelIncomingCall(): Promise<void> {
   } catch (e) { /* ignore */ }
 }
 
+// ── Background-delivery readiness (for app-killed incoming calls) ──
+// On aggressive OEM ROMs (Infinix/Transsion, Oppo/ColorOS, Xiaomi/MIUI, etc.)
+// a swiped-away app is force-stopped and stops receiving FCM data messages.
+// Exempting the app from battery optimization (and enabling Autostart) lets the
+// incoming-call message wake the app even when it's closed.
+export async function isBatteryOptimized(): Promise<boolean> {
+  try {
+    if (Platform.OS !== 'android') return false;
+    return await notifee.isBatteryOptimizationEnabled();
+  } catch (e) { return false; }
+}
+
+export async function openBatteryOptimizationSettings(): Promise<void> {
+  try { await notifee.openBatteryOptimizationSettings(); } catch (e) {}
+}
+
+export async function openPowerManagerSettings(): Promise<void> {
+  try { await notifee.openPowerManagerSettings(); } catch (e) {}
+}
+
 export async function setPendingCall(data: any): Promise<void> {
   try { await AsyncStorage.setItem(PENDING_CALL_KEY, JSON.stringify(data || {})); } catch (e) {}
 }
