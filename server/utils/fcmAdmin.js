@@ -7,10 +7,10 @@
 // downloaded from Firebase console → Project settings → Service accounts):
 //   FIREBASE_SERVICE_ACCOUNT = <the full JSON, as a single-line string>
 //
-// Everything here is best-effort and never throws — a failed push must not
-// break the call flow.
+// Uses the firebase-admin v14 modular API. Everything here is best-effort and
+// never throws — a failed push must not break the call flow.
 
-let admin = null;
+let messagingInstance = null;
 let initialized = false;
 let initTried = false;
 
@@ -23,16 +23,20 @@ function init() {
       console.warn('[FCM-ADMIN] FIREBASE_SERVICE_ACCOUNT not set — call data messages disabled.');
       return;
     }
-    admin = require('firebase-admin');
+    const { initializeApp, getApps, cert } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
+
     const serviceAccount = JSON.parse(raw);
-    if (!admin.apps.length) {
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-    }
+    const app = getApps().length
+      ? getApps()[0]
+      : initializeApp({ credential: cert(serviceAccount) });
+
+    messagingInstance = getMessaging(app);
     initialized = true;
     console.log('[FCM-ADMIN] Initialized.');
   } catch (err) {
     console.error('[FCM-ADMIN] init failed:', err.message);
-    admin = null;
+    messagingInstance = null;
     initialized = false;
   }
 }
@@ -45,7 +49,7 @@ function init() {
 async function sendData(tokens, data) {
   try {
     init();
-    if (!initialized || !admin) return;
+    if (!initialized || !messagingInstance) return;
     const valid = (tokens || []).filter((t) => typeof t === 'string' && t.length > 10);
     if (valid.length === 0) return;
 
@@ -63,7 +67,7 @@ async function sendData(tokens, data) {
       },
     };
 
-    const res = await admin.messaging().sendEachForMulticast(message);
+    const res = await messagingInstance.sendEachForMulticast(message);
     console.log(`[FCM-ADMIN] sent: ${res.successCount} ok, ${res.failureCount} failed`);
   } catch (err) {
     console.error('[FCM-ADMIN] sendData error:', err.message);
