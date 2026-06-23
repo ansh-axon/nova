@@ -1,8 +1,10 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { useApp } from '../../context/AppContext';
 
 export default function TabsLayout() {
+  const { missedCallCount } = useApp();
   return (
     <Tabs
       sceneContainerStyle={{ backgroundColor: '#090d16' }}
@@ -72,6 +74,8 @@ export default function TabsLayout() {
         options={{
           title: 'Calls',
           headerTitle: 'Call Log',
+          tabBarBadge: missedCallCount > 0 ? missedCallCount : undefined,
+          tabBarBadgeStyle: styles.callsBadge,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'call' : 'call-outline'}
@@ -119,6 +123,15 @@ const styles = StyleSheet.create({
   tabBarLabel: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  callsBadge: {
+    backgroundColor: '#ef4444',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    minWidth: 18,
+    height: 18,
+    lineHeight: 14,
   },
   header: {
     backgroundColor: '#090d16',

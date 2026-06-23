@@ -93,6 +93,8 @@ interface AppContextType {
   loading: boolean;
   statuses: StatusStory[];
   callHistory: CallRecord[];
+  missedCallCount: number;
+  markCallsSeen: () => Promise<void>;
   setServerUrl: (url: string) => void;
   setActiveConversationId: (id: string | null) => void;
   login: (username: string, password: string, customUrl?: string) => Promise<boolean | { needsVerification: boolean; email?: string }>;
@@ -244,6 +246,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [loading, setLoading] = useState<boolean>(true);
   const [statuses, setStatuses] = useState<StatusStory[]>([]);
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+  // Unseen incoming missed/rejected calls → shown as a badge on the Calls tab,
+  // cleared when the user opens the Calls tab. Persisted across restarts.
+  const [missedCallCount, setMissedCallCount] = useState<number>(0);
+  const [callsSeenAt, setCallsSeenAt] = useState<number>(0);
 
   const [chatWallpaper, setChatWallpaperState] = useState<string | null>(null);
   const [selectedRingtone, setSelectedRingtoneState] = useState<string>('Neon Horizon');
@@ -2441,6 +2447,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // REST API: Fetch call history
+  // Load the persisted "calls last seen" timestamp once on mount.
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('callsSeenAt');
+        if (raw) setCallsSeenAt(parseInt(raw, 10) || 0);
+      } catch (e) {}
+    })();
+  }, []);
+
+  // Recompute the unseen missed-call count whenever the log or seen-marker changes.
+  useEffect(() => {
+    const count = (callHistory || []).filter((c: any) => {
+      const isCallerMe = c.caller?._id === user?.id || c.caller?.id === user?.id;
+      if (isCallerMe) return false;
+      if (c.status !== 'missed' && c.status !== 'rejected') return false;
+      const t = new Date(c.createdAt).getTime();
+      return t > callsSeenAt;
+    }).length;
+    setMissedCallCount(count);
+  }, [callHistory, callsSeenAt, user]);
+
+  // Marks all current missed calls as seen (called when the Calls tab opens),
+  // clearing the tab badge. Persisted so it survives app restarts.
+  const markCallsSeen = useCallback(async () => {
+    const now = Date.now();
+    setCallsSeenAt(now);
+    setMissedCallCount(0);
+    try { await AsyncStorage.setItem('callsSeenAt', String(now)); } catch (e) {}
+  }, []);
+
   const fetchCallHistory = async () => {
     if (!token) return;
     try {
@@ -2455,6 +2492,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error('Fetch call history error:', err);
     }
   };
+
+  // When a call concludes (possibly missed/unanswered), refresh the log shortly
+  // after so the Calls-tab badge updates even if the user never opens that tab.
+  useEffect(() => {
+    if (callState === 'ended') {
+      const t = setTimeout(() => { fetchCallHistory().catch(() => {}); }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [callState]);
 
   // REST API: Initiate call log
   const initiateCallLog = async (recipientId: string, callType: 'voice' | 'video', conversationId?: string): Promise<any | null> => {
@@ -2598,6 +2644,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loading,
         statuses,
         callHistory,
+        missedCallCount,
+        markCallsSeen,
         setServerUrl,
         setActiveConversationId,
         login,

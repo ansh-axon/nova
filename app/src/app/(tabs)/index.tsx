@@ -115,12 +115,6 @@ export default function BentoDashboardScreen() {
     }
   }, [isFocused]);
 
-  // Real count of incoming calls that were missed or rejected (not placed by me).
-  const missedCallCount = (callHistory || []).filter((c: any) => {
-    const isCallerMe = c.caller?._id === user?.id || c.caller?.id === user?.id;
-    return !isCallerMe && (c.status === 'missed' || c.status === 'rejected');
-  }).length;
-
   const handleStartChat = async (recipientId: string) => {
     setStartingChat(true);
     const conversationId = await startConversation(recipientId);
@@ -412,22 +406,8 @@ export default function BentoDashboardScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Right Column: Calls tab & Secure Vault Dialog shortcuts */}
+          {/* Right Column: Locked Chats shortcut */}
           <View style={styles.bentoRightColumn}>
-            {/* Calls Shortcut Card */}
-            <TouchableOpacity 
-              style={[styles.bentoSmallCard, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}
-              onPress={() => router.push('/(tabs)/calls')}
-            >
-              <Ionicons name="call" size={20} color="#f59e0b" style={styles.bentoCardIcon} />
-              <View>
-                <Text style={[styles.bentoSmallCardTitle, { color: '#f59e0b' }]}>Calls</Text>
-                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(245, 158, 11, 0.7)' }]}>
-                  {missedCallCount > 0 ? `${missedCallCount} Missed Call${missedCallCount > 1 ? 's' : ''}` : 'No missed calls'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
             {/* Locked (hidden) Chats Card — opens behind fingerprint / PIN */}
             <TouchableOpacity 
               style={[styles.bentoSmallCard, { backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}

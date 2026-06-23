@@ -7,7 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 const { width, height } = Dimensions.get('window');
 
 export default function CallsScreen() {
-  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall } = useApp();
+  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall, markCallsSeen } = useApp();
   const isFocused = useIsFocused();
 
   // Call simulation states
@@ -28,7 +28,11 @@ export default function CallsScreen() {
   useEffect(() => {
     if (isFocused) {
       setLoading(true);
-      fetchCallHistory().then(() => setLoading(false));
+      fetchCallHistory().then(() => {
+        setLoading(false);
+        // Viewing the call log marks all missed calls as seen → clears tab badge.
+        markCallsSeen();
+      });
       fetchUsers();
     }
   }, [isFocused]);
