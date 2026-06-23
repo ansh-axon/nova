@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, TextInput, ActivityIndicator, Dimensions, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, TextInput, ActivityIndicator, Dimensions, ScrollView, Share } from 'react-native';
 import { showNeonAlert } from '../../components/NeonAlert';
 import { useApp, Conversation, User } from '../../context/AppContext';
 import { useRouter, useNavigation } from 'expo-router';
@@ -12,6 +12,10 @@ import SetSecurityPinModal from '../../components/SetSecurityPinModal';
 import { hasSecurityPin } from '../../utils/applock';
 
 const { width } = Dimensions.get('window');
+
+// Where new users download the NOVA APK. Update this to your GitHub Release
+// asset URL (or Google Drive link) once the 140 MB APK is uploaded there.
+const INVITE_DOWNLOAD_URL = 'https://github.com/ansh-axon/nova/releases';
 
 interface VaultItem {
   name: string;
@@ -114,6 +118,22 @@ export default function BentoDashboardScreen() {
       fetchCallHistory();
     }
   }, [isFocused]);
+
+  // Opens the system share sheet with an invite message + download link so
+  // friends can install NOVA and find the inviter by username.
+  const handleInviteFriend = async () => {
+    const myName = user?.username || user?.displayName || '';
+    const message =
+      `Join me on NOVA 🔐 — a private, secure chat app.\n\n` +
+      `📲 Download: ${INVITE_DOWNLOAD_URL}\n` +
+      (myName ? `👤 Find me: @${myName}\n\n` : '\n') +
+      `Let's chat securely on NOVA!`;
+    try {
+      await Share.share({ message });
+    } catch (e) {
+      // user cancelled or share unavailable — ignore
+    }
+  };
 
   const handleStartChat = async (recipientId: string) => {
     setStartingChat(true);
@@ -406,8 +426,22 @@ export default function BentoDashboardScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Right Column: Locked Chats shortcut */}
+          {/* Right Column: Invite + Locked Chats shortcuts */}
           <View style={styles.bentoRightColumn}>
+            {/* Invite Friend Card — shares download link + your username */}
+            <TouchableOpacity 
+              style={[styles.bentoSmallCard, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}
+              onPress={handleInviteFriend}
+            >
+              <Ionicons name="person-add" size={20} color="#10b981" style={styles.bentoCardIcon} />
+              <View>
+                <Text style={[styles.bentoSmallCardTitle, { color: '#10b981' }]}>Invite Friend</Text>
+                <Text style={[styles.bentoSmallCardSubtitle, { color: 'rgba(16, 185, 129, 0.7)' }]}>
+                  Share NOVA
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             {/* Locked (hidden) Chats Card — opens behind fingerprint / PIN */}
             <TouchableOpacity 
               style={[styles.bentoSmallCard, { backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}
