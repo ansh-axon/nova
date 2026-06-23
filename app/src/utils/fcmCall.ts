@@ -1,7 +1,10 @@
 import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidCategory, AndroidVisibility, EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
+import * as IntentLauncher from 'expo-intent-launcher';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const APP_PACKAGE = 'com.rahulverma.nova';
 
 // Incoming-call experience for when the app is backgrounded/closed:
 // the server sends a high-priority FCM DATA message → the background handler
@@ -128,6 +131,24 @@ export async function openBatteryOptimizationSettings(): Promise<void> {
 
 export async function openPowerManagerSettings(): Promise<void> {
   try { await notifee.openPowerManagerSettings(); } catch (e) {}
+}
+
+// Fires the system's ONE-TAP "Allow [app] to ignore battery optimisations?"
+// dialog (Allow / Deny) instead of making the user dig through Settings.
+// Requires the REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission in the manifest.
+// Returns true if the dialog could be launched.
+export async function requestIgnoreBatteryOptimizations(): Promise<boolean> {
+  try {
+    if (Platform.OS !== 'android') return false;
+    await IntentLauncher.startActivityAsync(
+      'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      { data: 'package:' + APP_PACKAGE }
+    );
+    return true;
+  } catch (e) {
+    // Fallback: open the battery-optimisation list if the direct dialog fails.
+    try { await notifee.openBatteryOptimizationSettings(); return true; } catch (e2) { return false; }
+  }
 }
 
 export async function setPendingCall(data: any): Promise<void> {

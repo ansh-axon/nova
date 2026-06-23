@@ -15,7 +15,7 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
-import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, isBatteryOptimized, openBatteryOptimizationSettings, openPowerManagerSettings } from '../utils/fcmCall';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -1051,22 +1051,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showNeonAlert({
         title: 'ALLOW CALLS WHEN CLOSED',
         message:
-          'To receive calls even when NOVA is closed, allow it to run in the background.\n\n1) Tap "Allow" and choose "Don\'t optimize" / "No restrictions".\n2) Then enable "Autostart" for NOVA in your phone settings.',
+          'NOVA needs to run in the background so calls reach you even when the app is closed or your screen is locked.\n\nTap "Allow" and choose YES on the next screen.',
         icon: 'battery-charging-outline',
         borderColor: '#00ddff',
         iconColor: '#00ddff',
         buttons: [
           { text: 'Later', style: 'cancel' },
           {
-            text: 'Autostart',
-            onPress: () => { openPowerManagerSettings(); },
-          },
-          {
             text: 'Allow',
             style: 'default',
             onPress: async () => {
               await AsyncStorage.setItem('battery_opt_prompt_v1', 'done');
-              openBatteryOptimizationSettings();
+              // One-tap system dialog: "Allow NOVA to ignore battery optimisations?"
+              await requestIgnoreBatteryOptimizations();
             },
           },
         ],
