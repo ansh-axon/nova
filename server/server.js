@@ -44,6 +44,9 @@ app.use('/uploads', (req, res, next) => {
   next();
 }, express.static(path.join(__dirname, 'uploads')));
 
+// Serve the /public folder (birthday page assets like song.mp3) at /static.
+app.use('/static', express.static(path.join(__dirname, 'public')));
+
 // Store active socket connections: userId -> socketId
 const activeSockets = {};
 // Store typing status: conversationId -> Set of typing users
