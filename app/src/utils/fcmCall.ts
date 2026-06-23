@@ -38,7 +38,9 @@ async function putToServer(path: string): Promise<void> {
 // here shows a full-screen call notification (via notifee) with Accept/Reject
 // and a looping ringtone. Accept opens the app; Reject calls the server.
 
-const CALL_CHANNEL = 'nova_incoming_call';
+// NOTE: bump this id whenever the channel's sound/importance changes — Android
+// channels are immutable once created, so a new id forces the new settings.
+const CALL_CHANNEL = 'nova_incoming_call_v3';
 const CALL_NOTIF_ID = 'nova_incoming_call_notif';
 
 // Stores the pending call so the app, once opened, can act on Accept.
@@ -53,6 +55,7 @@ export async function ensureCallChannel(): Promise<void> {
     sound: 'ring_call',
     vibration: true,
     vibrationPattern: [400, 1000, 400, 1000],
+    bypassDnd: true,
   });
 }
 
