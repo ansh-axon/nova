@@ -89,6 +89,13 @@ router.post('/initiate', auth, async (req, res) => {
             callerName,
             callerId: req.user.id,
             conversationId: conversationId || '',
+          }, {
+            // Notification payload → OS shows + rings on the lock screen even
+            // when the app is fully closed (reliable on aggressive OEM ROMs).
+            title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
+            body: `${callerName} is calling you on NOVA`,
+            channelId: 'nova_incoming_call_v3',
+            sound: 'ring_call',
           });
           // Prune tokens FCM reported as permanently invalid (e.g. reinstalled app).
           if (Array.isArray(invalidTokens) && invalidTokens.length > 0) {

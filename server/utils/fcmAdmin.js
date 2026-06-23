@@ -42,16 +42,20 @@ function init() {
 }
 
 /**
- * Send a data-only high-priority FCM message to the given device tokens.
+ * Send a high-priority FCM message to the given device tokens.
  * @param {string[]} tokens
  * @param {object} data  // string key/values only (FCM data requirement)
+ * @param {object} [notification]  // { title, body, channelId, sound } — when
+ *   provided, a notification payload is included so the OS itself shows + rings
+ *   the alert on the lock screen even when the app is fully closed (data-only
+ *   messages are dropped by aggressive ROMs). Returns invalid tokens to prune.
  */
-async function sendData(tokens, data) {
+async function sendData(tokens, data, notification) {
   try {
     init();
-    if (!initialized || !messagingInstance) return;
+    if (!initialized || !messagingInstance) return [];
     const valid = (tokens || []).filter((t) => typeof t === 'string' && t.length > 10);
-    if (valid.length === 0) return;
+    if (valid.length === 0) return [];
 
     // FCM data values must all be strings.
     const stringData = {};
@@ -59,18 +63,39 @@ async function sendData(tokens, data) {
       stringData[k] = data[k] == null ? '' : String(data[k]);
     });
 
-    const message = {
-      tokens: valid,
-      data: stringData,
-      android: {
-        priority: 'high',
-      },
-    };
+    const android = { priority: 'high' };
+    const message = { tokens: valid, data: stringData, android };
+
+    if (notification && notification.title) {
+      message.notification = { title: notification.title, body: notification.body || '' };
+      android.notification = {
+        sound: notification.sound || 'default',
+        priority: 'max',
+        visibility: 'public',
+        channelId: notification.channelId || undefined,
+      };
+    }
 
     const res = await messagingInstance.sendEachForMulticast(message);
     console.log(`[FCM-ADMIN] sent: ${res.successCount} ok, ${res.failureCount} failed`);
+
+    const invalidTokens = [];
+    (res.responses || []).forEach((r, i) => {
+      if (!r.success) {
+        const code = r.error && r.error.code;
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token' ||
+          code === 'messaging/invalid-argument'
+        ) {
+          invalidTokens.push(valid[i]);
+        }
+      }
+    });
+    return invalidTokens;
   } catch (err) {
     console.error('[FCM-ADMIN] sendData error:', err.message);
+    return [];
   }
 }
 

@@ -1197,6 +1197,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsub();
   }, [token, user, reconcilePendingCall]);
 
+  // Shows the in-app incoming-call screen from FCM call data. Used when the user
+  // taps the system call notification (the reliable path on closed/locked
+  // phones): the OS shows + rings the notification, the tap opens the app here.
+  const showIncomingCallFromData = useCallback((data: any) => {
+    if (!data || data.type !== 'incoming_call' || !data.callId) return;
+    const callObj: any = {
+      _id: data.callId,
+      callRoomId: data.callRoomId,
+      callType: data.callType === 'video' ? 'video' : 'voice',
+      caller: { _id: data.callerId, id: data.callerId, displayName: data.callerName, username: data.callerName, avatarUrl: '' },
+      receiver: user,
+      status: 'ringing',
+    };
+    setIncomingCall(callObj);
+    setCallState('ringing');
+  }, [user]);
+
+  // App opened by tapping the call notification (killed → getInitialNotification,
+  // background → onNotificationOpenedApp).
+  useEffect(() => {
+    if (!token || !user) return;
+    messaging()
+      .getInitialNotification()
+      .then((rm: any) => { if (rm?.data?.type === 'incoming_call') showIncomingCallFromData(rm.data); })
+      .catch(() => {});
+    const unsub = messaging().onNotificationOpenedApp((rm: any) => {
+      if (rm?.data?.type === 'incoming_call') showIncomingCallFromData(rm.data);
+    });
+    return () => unsub();
+  }, [token, user, showIncomingCallFromData]);
+
 
   // Initialize and manage Socket.io connection
   useEffect(() => {
