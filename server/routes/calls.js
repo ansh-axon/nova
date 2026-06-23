@@ -81,6 +81,11 @@ router.post('/initiate', auth, async (req, res) => {
         const tokCount = Array.isArray(recipient.fcmTokens) ? recipient.fcmTokens.length : 0;
         console.log(`[FCM] call initiate → recipient ${recipientId} has ${tokCount} fcmToken(s)`);
         if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
+          // Ring with the recipient's chosen tone via its dedicated channel.
+          const TONE_IDS = ['pulse','chime','ripple','glow','beacon','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
+          const tone = (recipient.callRingtone && TONE_IDS.indexOf(recipient.callRingtone) >= 0) ? recipient.callRingtone : null;
+          const ringChannelId = tone ? ('nova_call_' + tone) : 'nova_incoming_call_v3';
+          const ringSound = tone || 'ring_call';
           const invalidTokens = await sendData(recipient.fcmTokens, {
             type: 'incoming_call',
             callId: call._id.toString(),
@@ -94,8 +99,8 @@ router.post('/initiate', auth, async (req, res) => {
             // when the app is fully closed (reliable on aggressive OEM ROMs).
             title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
             body: `${callerName} is calling you on NOVA`,
-            channelId: 'nova_incoming_call_v3',
-            sound: 'ring_call',
+            channelId: ringChannelId,
+            sound: ringSound,
           });
           // Prune tokens FCM reported as permanently invalid (e.g. reinstalled app).
           if (Array.isArray(invalidTokens) && invalidTokens.length > 0) {

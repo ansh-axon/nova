@@ -59,6 +59,48 @@ export async function ensureCallChannel(): Promise<void> {
   });
 }
 
+// Built-in tones bundled as notification (res/raw) sounds. The lock-screen /
+// closed-app call ring uses a notification CHANNEL sound, which Android freezes
+// at creation time — so each selectable ringtone needs its own channel.
+export const CALL_TONE_IDS = [
+  'pulse', 'chime', 'ripple', 'glow', 'beacon', 'aurora',
+  'marimba', 'classic', 'bright', 'bubble', 'cool', 'melody', 'romantic',
+];
+
+// Returns the notification channel id whose sound matches the chosen ringtone
+// (falls back to the default ring_call channel).
+export function callChannelIdForTone(toneId?: string | null): string {
+  if (toneId && CALL_TONE_IDS.indexOf(toneId) >= 0) return 'nova_call_' + toneId;
+  return CALL_CHANNEL;
+}
+
+// Creates (once) the per-tone incoming-call channel so its sound rings on the
+// lock screen. No-op for unknown ids.
+export async function ensureToneCallChannel(toneId: string): Promise<string> {
+  if (Platform.OS !== 'android' || CALL_TONE_IDS.indexOf(toneId) < 0) return CALL_CHANNEL;
+  const id = 'nova_call_' + toneId;
+  await notifee.createChannel({
+    id,
+    name: 'Incoming Calls (' + toneId + ')',
+    importance: AndroidImportance.HIGH,
+    sound: toneId,
+    vibration: true,
+    vibrationPattern: [400, 1000, 400, 1000],
+    bypassDnd: true,
+  });
+  return id;
+}
+
+// Persisted id of the user's chosen call ringtone (so it can be re-applied and
+// re-uploaded to the server on every app start).
+const CALL_RINGTONE_KEY = 'call_ringtone_id_v1';
+export async function setSelectedCallRingtone(id: string): Promise<void> {
+  try { await AsyncStorage.setItem(CALL_RINGTONE_KEY, id); } catch (e) {}
+}
+export async function getSelectedCallRingtone(): Promise<string | null> {
+  try { return await AsyncStorage.getItem(CALL_RINGTONE_KEY); } catch (e) { return null; }
+}
+
 // Asks for notification permission and returns the device FCM token (or null),
 // along with a short diagnostic string describing each step's outcome (so the
 // failure point is visible in server logs without needing device logcat).

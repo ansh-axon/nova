@@ -75,6 +75,12 @@ const UserSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  // Chosen incoming-call ringtone id (maps to a per-tone notification channel
+  // so the selected ringtone rings on the lock screen / when the app is closed)
+  callRingtone: {
+    type: String,
+    default: ''
+  },
   // Users this user has blocked (they can't message each other)
   blockedUsers: {
     type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

@@ -16,7 +16,7 @@ import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
 import notifee, { EventType } from '@notifee/react-native';
-import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations } from '../utils/fcmCall';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations, ensureToneCallChannel, setSelectedCallRingtone, getSelectedCallRingtone } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -142,6 +142,7 @@ interface AppContextType {
   // User-selected custom tones (picked from device). null = use default.
   customTones: { call: ToneRef | null; message: ToneRef | null; group: ToneRef | null };
   setCustomTone: (kind: 'call' | 'message' | 'group', tone: ToneRef | null) => Promise<void>;
+  registerCallRingtone: (toneId: string) => Promise<void>;
   playMessageTone: (isGroup: boolean) => void;
   // App lock + hidden (locked) chats
   appLockEnabled: boolean;
@@ -1044,6 +1045,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ── Native FCM (full-screen incoming-call data messages) ──
   const fcmTokenRef = useRef<string | null>(null);
 
+  // Applies the user's chosen incoming-call ringtone: creates its dedicated
+  // notification channel (so it rings on the lock screen) and tells the server
+  // to use that channel when ringing this device.
+  const registerCallRingtone = useCallback(async (toneId: string) => {
+    try {
+      await ensureToneCallChannel(toneId);
+      await setSelectedCallRingtone(toneId);
+      if (token) {
+        await fetch(`${serverUrl}/api/users/call-ringtone`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ ringtone: toneId }),
+        });
+      }
+    } catch (e) { /* best-effort */ }
+  }, [serverUrl, token]);
+
   // Shows a one-time popup asking the user to exempt NOVA from battery
   // optimization (and enable Autostart on OEM ROMs). Without this, a fully
   // closed app won't receive the incoming-call wake-up on phones like
@@ -1112,6 +1130,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (e) {}
         if (res.token) {
           await uploadToken(res.token);
+          // Re-apply the saved call ringtone (channel + server) so the right
+          // tone rings on the lock screen for this device.
+          try {
+            const savedTone = await getSelectedCallRingtone();
+            if (savedTone) await registerCallRingtone(savedTone);
+          } catch (e) {}
           // One-time nudge to exempt the app from battery optimization so
           // incoming calls can wake it even when fully closed (required on
           // aggressive OEM ROMs like Infinix/Oppo/Xiaomi).
@@ -2732,6 +2756,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         selectedRingtone,
         customTones,
         setCustomTone,
+        registerCallRingtone,
         playMessageTone,
         appLockEnabled,
         appLocked,

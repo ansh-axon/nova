@@ -2,7 +2,7 @@
   "expo": {
     "name": "NOVA",
     "slug": "nova-chat",
-    "version": "1.1.7",
+    "version": "1.1.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "app",
@@ -86,7 +86,20 @@
         {
           "sounds": [
             "./assets/tones/notif_message.wav",
-            "./assets/tones/ring_call.wav"
+            "./assets/tones/ring_call.wav",
+            "./assets/tones/pulse.wav",
+            "./assets/tones/chime.wav",
+            "./assets/tones/ripple.wav",
+            "./assets/tones/glow.wav",
+            "./assets/tones/beacon.wav",
+            "./assets/tones/aurora.wav",
+            "./assets/tones/marimba.wav",
+            "./assets/tones/classic.wav",
+            "./assets/tones/bright.wav",
+            "./assets/tones/bubble.wav",
+            "./assets/tones/cool.mp3",
+            "./assets/tones/melody.mp3",
+            "./assets/tones/romantic.mp3"
           ]
         }
       ],
