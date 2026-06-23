@@ -3,8 +3,35 @@ import notifee, { AndroidImportance, AndroidCategory, AndroidVisibility, EventTy
 import { Platform } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getToken } from './tokenStore';
 
 const APP_PACKAGE = 'com.rahulverma.nova';
+const DEFAULT_SERVER = 'https://nova-server-wg9p.onrender.com';
+
+// Reads the configured server URL (falls back to the production default) so the
+// background handler can reach the API even when the app is fully closed.
+async function getServerBaseUrl(): Promise<string> {
+  try {
+    const u = await AsyncStorage.getItem('serverUrl');
+    if (u) return u.replace(/\/$/, '');
+  } catch (e) {}
+  return DEFAULT_SERVER;
+}
+
+// Sends an authenticated PUT to the server from the (possibly headless)
+// background context — used to reject a call directly from the notification
+// action so the caller stops ringing even if the app never opens.
+async function putToServer(path: string): Promise<void> {
+  try {
+    const token = await getToken();
+    if (!token) return;
+    const base = await getServerBaseUrl();
+    await fetch(`${base}${path}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    });
+  } catch (e) { /* best-effort */ }
+}
 
 // Incoming-call experience for when the app is backgrounded/closed:
 // the server sends a high-priority FCM DATA message → the background handler
@@ -190,13 +217,20 @@ export function registerCallBackgroundHandlers(): void {
   // Notifee action presses (Accept/Reject) while in the background.
   notifee.onBackgroundEvent(async ({ type, detail }) => {
     const pressId = detail?.pressAction?.id;
+    const data = detail?.notification?.data || {};
+    const callId = data.callId as string | undefined;
     if (type === EventType.ACTION_PRESS && pressId === 'reject') {
-      // Reject in the background: mark intent; app/server reconcile via socket.
+      // Reject immediately on the server so the caller stops ringing, even
+      // though tapping Reject does NOT open the app.
       await cancelIncomingCall();
-      await setPendingCall({ ...(detail?.notification?.data || {}), _action: 'reject' });
+      await clearPendingCall();
+      if (callId) await putToServer(`/api/calls/${callId}/reject`);
     } else if (type === EventType.ACTION_PRESS && pressId === 'accept') {
+      // Accept needs the foreground app for the WebRTC handshake: store the
+      // intent and let reconcilePendingCall() finish once the app opens
+      // (the action's launchActivity brings the app to the foreground).
       await cancelIncomingCall();
-      await setPendingCall({ ...(detail?.notification?.data || {}), _action: 'accept' });
+      await setPendingCall({ ...data, _action: 'accept' });
     } else if (type === EventType.PRESS) {
       await cancelIncomingCall();
     }

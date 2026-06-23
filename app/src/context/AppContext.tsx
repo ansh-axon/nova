@@ -15,7 +15,8 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
-import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations } from '../utils/fcmCall';
+import notifee, { EventType } from '@notifee/react-native';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -1174,6 +1175,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (s === 'active') reconcilePendingCall();
     });
     return () => sub.remove();
+  }, [token, user, reconcilePendingCall]);
+
+  // Handle Accept/Reject taps on the call notification while the app is in the
+  // FOREGROUND (the background handler in fcmCall.ts covers the closed case).
+  useEffect(() => {
+    if (!token || !user) return;
+    const unsub = notifee.onForegroundEvent(async ({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS) return;
+      const pressId = detail?.pressAction?.id;
+      const data: any = detail?.notification?.data || {};
+      if (!data.callId) return;
+      if (pressId === 'reject') {
+        await cancelIncomingCall();
+        rejectCall(String(data.callId));
+      } else if (pressId === 'accept') {
+        await setPendingCall({ ...data, _action: 'accept' });
+        reconcilePendingCall();
+      }
+    });
+    return () => unsub();
   }, [token, user, reconcilePendingCall]);
 
 
