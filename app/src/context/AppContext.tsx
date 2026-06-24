@@ -164,6 +164,7 @@ interface AppContextType {
   callDuration: number;
   localStream: any | null;
   remoteStream: any | null;
+  remoteStreamKey: number;
   setIncomingCall: (call: any | null) => void;
   setActiveCall: (call: any | null) => void;
   setCallState: (state: 'ringing' | 'connected' | 'ended' | null) => void;
@@ -293,6 +294,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [callDuration, setCallDuration] = useState<number>(0);
   const [localStream, setLocalStream] = useState<any | null>(null);
   const [remoteStream, setRemoteStream] = useState<any | null>(null);
+  // Bumped each time a remote track arrives → used as the remote RTCView key so
+  // it remounts when the video track appears after audio (fixes black video).
+  const [remoteStreamKey, setRemoteStreamKey] = useState<number>(0);
   const pcRef = useRef<any>(null);
   const ringtoneSoundRef = useRef<any>(null);
   const isInitializingRef = useRef<boolean>(false);
@@ -586,13 +590,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pc.ontrack = (event: any) => {
         console.log('[WebRTC] Remote track received!', event.streams);
         if (event.streams && event.streams[0]) {
+          // New stream reference + a bumped key so the remote RTCView remounts
+          // when the VIDEO track arrives after audio (fixes black remote video).
           setRemoteStream(event.streams[0]);
-          // Ensure audio is properly enabled for remote stream
+          setRemoteStreamKey((k) => k + 1);
           event.streams[0].getTracks().forEach((track: any) => {
-            if (track.kind === 'audio') {
-              track.enabled = true;
-              console.log('[WebRTC] Remote audio track enabled');
-            }
+            // Ensure BOTH audio and video tracks are enabled on the remote side.
+            track.enabled = true;
+            console.log('[WebRTC] Remote track enabled:', track.kind);
           });
         }
       };
@@ -1460,7 +1465,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const pc = await initPeerConnection(data, true);
       if (pc) {
         try {
-          const offer = await pc.createOffer();
+          const offerOpts = (data.callType === 'video')
+            ? { offerToReceiveAudio: true, offerToReceiveVideo: true }
+            : undefined;
+          const offer = await pc.createOffer(offerOpts);
           await pc.setLocalDescription(offer);
           socketInstance.emit('webrtc_offer', {
             recipientId: data.receiver._id || data.receiver.id,
@@ -1681,7 +1689,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // Caller A initializes peer connection and creates offer!
             const pc = await initPeerConnection(callData, true);
             if (pc) {
-              const offer = await pc.createOffer();
+              const offerOpts = (callData.callType === 'video')
+                ? { offerToReceiveAudio: true, offerToReceiveVideo: true }
+                : undefined;
+              const offer = await pc.createOffer(offerOpts);
               await pc.setLocalDescription(offer);
               const currentSocket = socketRef.current;
               if (currentSocket) {
@@ -2774,6 +2785,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         callDuration,
         localStream,
         remoteStream,
+        remoteStreamKey,
         setIncomingCall,
         setActiveCall,
         setCallState,

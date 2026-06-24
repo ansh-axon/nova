@@ -103,6 +103,7 @@ function GlobalCallHost() {
     endCall,
     localStream,
     remoteStream,
+    remoteStreamKey,
     user
   } = useApp();
 
@@ -222,6 +223,7 @@ function GlobalCallHost() {
         {/* Remote Live Video Stream via RTCView */}
         {isVideo && callState === 'connected' && remoteStream ? (
           <RTCView
+            key={`remote-${remoteStreamKey}`}
             streamURL={remoteStream.toURL()}
             style={StyleSheet.absoluteFillObject}
             objectFit="cover"
