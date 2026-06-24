@@ -152,13 +152,19 @@ export async function registerForFcm(): Promise<FcmRegisterResult> {
 export async function displayIncomingCall(data: any): Promise<void> {
   try {
     await ensureCallChannel();
+    // Ring with the user's chosen tone via its dedicated channel (if any).
+    let channelId = CALL_CHANNEL;
+    try {
+      const toneId = await getSelectedCallRingtone();
+      if (toneId) channelId = await ensureToneCallChannel(toneId);
+    } catch (e) {}
     await notifee.displayNotification({
       id: CALL_NOTIF_ID,
       title: `Incoming ${data.callType === 'video' ? 'video' : 'voice'} call`,
       body: `${data.callerName || 'Someone'} is calling you on NOVA`,
       data: data || {},
       android: {
-        channelId: CALL_CHANNEL,
+        channelId,
         importance: AndroidImportance.HIGH,
         category: AndroidCategory.CALL,
         visibility: AndroidVisibility.PUBLIC,
@@ -177,6 +183,18 @@ export async function displayIncomingCall(data: any): Promise<void> {
   } catch (e) {
     console.warn('[FCM] displayIncomingCall failed:', (e as any)?.message || e);
   }
+}
+
+// Opens the Android 14+ "Full screen notifications" permission screen for NOVA,
+// needed so incoming calls take over the lock screen (instead of a heads-up).
+export async function openFullScreenIntentSettings(): Promise<void> {
+  try {
+    if (Platform.OS !== 'android') return;
+    await IntentLauncher.startActivityAsync(
+      'android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT',
+      { data: 'package:' + APP_PACKAGE }
+    );
+  } catch (e) { /* not present on this Android version */ }
 }
 
 export async function cancelIncomingCall(): Promise<void> {

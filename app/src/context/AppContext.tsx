@@ -16,7 +16,7 @@ import { router } from 'expo-router';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
 import notifee, { EventType } from '@notifee/react-native';
-import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations, ensureToneCallChannel, setSelectedCallRingtone, getSelectedCallRingtone } from '../utils/fcmCall';
+import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations, ensureToneCallChannel, setSelectedCallRingtone, getSelectedCallRingtone, openFullScreenIntentSettings } from '../utils/fcmCall';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -1068,25 +1068,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Infinix/Oppo/Xiaomi. Tapping a button opens the relevant system screen.
   const maybePromptBatteryOptimization = useCallback(async () => {
     try {
-      const optimized = await isBatteryOptimized();
-      if (!optimized) return; // already exempt — nothing to do
-      const shown = await AsyncStorage.getItem('battery_opt_prompt_v1');
-      if (shown === 'done') return; // don't nag every login
+      const shown = await AsyncStorage.getItem('call_setup_prompt_v2');
+      if (shown === 'done') return; // shown once; don't nag every login
 
       showNeonAlert({
         title: 'ALLOW CALLS WHEN CLOSED',
         message:
-          'NOVA needs to run in the background so calls reach you even when the app is closed or your screen is locked.\n\nTap "Allow" and choose YES on the next screen.',
+          'For calls to ring full-screen even when NOVA is closed or your screen is locked:\n\n1) Tap "Allow" → choose YES (run in background).\n2) Tap "Full Screen" → turn ON for NOVA (so the call covers the lock screen).',
         icon: 'battery-charging-outline',
         borderColor: '#00ddff',
         iconColor: '#00ddff',
         buttons: [
           { text: 'Later', style: 'cancel' },
           {
+            text: 'Full Screen',
+            onPress: () => { openFullScreenIntentSettings(); },
+          },
+          {
             text: 'Allow',
             style: 'default',
             onPress: async () => {
-              await AsyncStorage.setItem('battery_opt_prompt_v1', 'done');
+              await AsyncStorage.setItem('call_setup_prompt_v2', 'done');
               // One-tap system dialog: "Allow NOVA to ignore battery optimisations?"
               await requestIgnoreBatteryOptimizations();
             },
