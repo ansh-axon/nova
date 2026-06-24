@@ -53,7 +53,13 @@ const CallSchema = new mongoose.Schema({
   },
   // Timestamps
   startedAt: Date,
-  endedAt: Date
+  endedAt: Date,
+  // Users who cleared this call from THEIR call log (per-user delete, so it
+  // never removes the record from the other participant's log).
+  deletedFor: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Call', CallSchema);

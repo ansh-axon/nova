@@ -33,7 +33,11 @@ router.get('/:conversationId', auth, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to view messages' });
     }
 
-    const messages = await Message.find({ conversation: req.params.conversationId })
+    const messages = await Message.find({
+      conversation: req.params.conversationId,
+      // Hide messages this user has cleared from their own chat.
+      deletedFor: { $ne: req.user.id },
+    })
       .populate('sender', 'username displayName avatarUrl')
       .populate('readBy.user', 'username displayName avatarUrl')
       .sort({ createdAt: 1 });
@@ -42,6 +46,29 @@ router.get('/:conversationId', auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error loading messages' });
+  }
+});
+
+// @route   DELETE api/messages/conversation/:conversationId/clear
+// @desc    Permanently clear all messages in a conversation for THIS user only
+//          (per-user; the other participant keeps their copy, and old messages
+//          do NOT come back when new ones arrive). The conversation itself stays.
+router.delete('/conversation/:conversationId/clear', auth, async (req, res) => {
+  try {
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participants.includes(req.user.id)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    await Message.updateMany(
+      { conversation: req.params.conversationId, deletedFor: { $ne: req.user.id } },
+      { $addToSet: { deletedFor: req.user.id } }
+    );
+
+    res.json({ message: 'Chat cleared' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error clearing chat' });
   }
 });
 

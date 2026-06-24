@@ -138,6 +138,7 @@ interface AppContextType {
   markStatusViewed: (statusId: string) => Promise<void>;
   deleteStatus: (statusId: string) => Promise<boolean>;
   fetchCallHistory: () => Promise<void>;
+  clearCallHistory: () => Promise<boolean>;
   initiateCallLog: (recipientId: string, callType: 'voice' | 'video', conversationId?: string) => Promise<any | null>;
   endCallLog: (callId: string, duration?: number) => Promise<void>;
   chatWallpaper: string | null;
@@ -2376,17 +2377,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Clear/delete a chat: removes it for this user (server soft-deletes 1-on-1,
-  // and removes the member from a group = leave group).
+  // Permanently clears the chat for THIS user only (like the call-log clear):
+  // every message in the conversation is marked deleted-for-me on the server, so
+  // old messages NEVER come back when new ones arrive, and the other participant
+  // keeps their copy. The conversation itself stays in the list.
   const clearChat = async (conversationId: string): Promise<boolean> => {
     if (!token) return false;
     try {
-      const res = await fetch(`${serverUrl}/api/conversations/${conversationId}`, {
+      const res = await fetch(`${serverUrl}/api/messages/conversation/${conversationId}/clear`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (res.ok) {
-        setConversations((prev) => prev.filter((c) => c._id !== conversationId));
-        setMessages((prev) => { const n = { ...prev }; delete n[conversationId]; return n; });
+        // Clear locally cached messages + drop the last-message preview.
+        setMessages((prev) => ({ ...prev, [conversationId]: [] }));
+        setConversations((prev) => prev.map((c) => (
+          c._id === conversationId ? { ...c, lastMessage: undefined } : c
+        )));
       }
       return res.ok;
     } catch (e) {
@@ -2740,6 +2747,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Permanently clears THIS user's call log (server marks each call deleted for
+  // this user only — the other participant keeps their log).
+  const clearCallHistory = async (): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const response = await fetch(`${serverUrl}/api/calls/history`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setCallHistory([]);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Clear call history error:', err);
+      return false;
+    }
+  };
+
   // When a call concludes (possibly missed/unanswered), refresh the log shortly
   // after so the Calls-tab badge updates even if the user never opens that tab.
   useEffect(() => {
@@ -2922,6 +2949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markStatusViewed,
         deleteStatus,
         fetchCallHistory,
+        clearCallHistory,
         initiateCallLog,
         endCallLog,
         chatWallpaper,

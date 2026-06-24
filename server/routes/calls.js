@@ -16,7 +16,9 @@ router.get('/history', auth, async (req, res) => {
       $or: [
         { caller: req.user.id },
         { receiver: req.user.id }
-      ]
+      ],
+      // Hide calls this user has cleared from their own log.
+      deletedFor: { $ne: req.user.id }
     })
       .populate('caller', 'username displayName avatarUrl')
       .populate('receiver', 'username displayName avatarUrl')
@@ -27,6 +29,25 @@ router.get('/history', auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error fetching call history' });
+  }
+});
+
+// @route   DELETE api/calls/history
+// @desc    Permanently clear the authenticated user's call log (per-user; does
+//          NOT affect the other participant's log).
+router.delete('/history', auth, async (req, res) => {
+  try {
+    await Call.updateMany(
+      {
+        $or: [{ caller: req.user.id }, { receiver: req.user.id }],
+        deletedFor: { $ne: req.user.id },
+      },
+      { $addToSet: { deletedFor: req.user.id } }
+    );
+    res.json({ message: 'Call log cleared' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error clearing call history' });
   }
 });
 

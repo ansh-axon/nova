@@ -52,6 +52,13 @@ const MessageSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Users who cleared this message from THEIR chat (per-user delete — never
+  // removes it from the other participant's view, and it stays cleared even
+  // after new messages arrive).
+  deletedFor: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   // Auto-delete after 30 days to save space and ensure E2E privacy
   expiresAt: {
     type: Date,

@@ -9,7 +9,7 @@ import { useIsFocused } from '@react-navigation/native';
 const { width, height } = Dimensions.get('window');
 
 export default function CallsScreen() {
-  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall, markCallsSeen, activeCall, setActiveCall, setCallState, setCallDuration } = useApp();
+  const { user, callHistory, fetchCallHistory, clearCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall, markCallsSeen, activeCall, setActiveCall, setCallState, setCallDuration } = useApp();
   const isFocused = useIsFocused();
 
   const [loading, setLoading] = useState(false);
@@ -48,6 +48,30 @@ export default function CallsScreen() {
     startGroupCall(selectedIds, meetingType, selectedUsers);
     setShowMeeting(false);
     setSelectedIds([]);
+  };
+
+  // Permanently clear this user's call log (with a confirm step).
+  const handleClearCallLog = () => {
+    showNeonAlert({
+      title: 'CLEAR CALL LOG',
+      message: 'Permanently delete your entire call history? This cannot be undone.',
+      icon: 'trash-outline',
+      iconColor: '#f43f5e',
+      borderColor: '#f43f5e',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            const ok = await clearCallHistory();
+            if (ok) {
+              showNeonAlert({ title: 'CALL LOG CLEARED', message: 'Your call history has been removed.', icon: 'checkmark-circle-outline', iconColor: '#10b981', borderColor: '#10b981' });
+            }
+          },
+        },
+      ],
+    });
   };
 
   // Starts a REAL call (voice/video) via the global WebRTC call system; the
@@ -185,6 +209,12 @@ export default function CallsScreen() {
           keyExtractor={(item) => item._id}
           renderItem={renderCallItem}
           contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            <TouchableOpacity style={styles.clearLogBtn} onPress={handleClearCallLog} activeOpacity={0.8}>
+              <Ionicons name="trash-outline" size={16} color="#f43f5e" />
+              <Text style={styles.clearLogText}>Clear call log</Text>
+            </TouchableOpacity>
+          }
         />
       )}
 
@@ -273,6 +303,25 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  clearLogBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-end',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginBottom: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(244,63,94,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(244,63,94,0.2)',
+  },
+  clearLogText: {
+    color: '#f43f5e',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 6,
   },
   callCard: {
     flexDirection: 'row',

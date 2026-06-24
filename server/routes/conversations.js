@@ -23,10 +23,17 @@ router.get('/', auth, async (req, res) => {
     // someone else that this user has not read yet).
     const result = await Promise.all(conversations.map(async (c) => {
       const obj = c.toObject();
+      // Hide the last-message preview if this user has cleared that message
+      // from their side (per-user clear chat).
+      if (obj.lastMessage && Array.isArray(obj.lastMessage.deletedFor) &&
+          obj.lastMessage.deletedFor.some((d) => d.toString() === req.user.id)) {
+        obj.lastMessage = null;
+      }
       obj.unreadCount = await Message.countDocuments({
         conversation: c._id,
         sender: { $ne: req.user.id },
         'readBy.user': { $ne: req.user.id },
+        deletedFor: { $ne: req.user.id },
       });
       return obj;
     }));
