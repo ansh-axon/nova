@@ -93,6 +93,7 @@ router.post('/search', auth, async (req, res) => {
 
     const messages = await Message.find({
       conversation: conversationId,
+      deletedFor: { $ne: req.user.id },
       text: { $regex: safeQuery, $options: 'i' }
     })
       .populate('sender', 'username displayName avatarUrl')
@@ -462,35 +463,6 @@ router.put('/conversation/:conversationId/read-all', auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error marking conversation read' });
-  }
-});
-
-// @route   DELETE api/messages/:messageId
-// @desc    Delete a message (only sender can delete)
-router.delete('/:messageId', auth, async (req, res) => {
-  try {
-    const message = await Message.findById(req.params.messageId);
-    if (!message) {
-      return res.status(404).json({ message: 'Message not found' });
-    }
-
-    // Only sender can delete
-    if (message.sender.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Not authorized to delete this message' });
-    }
-
-    await Message.findByIdAndDelete(req.params.messageId);
-
-    // Notify participants
-    const conversation = await Conversation.findById(message.conversation);
-    conversation.participants.forEach(participantId => {
-      req.io.to(`user_${participantId.toString()}`).emit('message_deleted', req.params.messageId);
-    });
-
-    res.json({ message: 'Message deleted' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error deleting message' });
   }
 });
 
