@@ -1228,6 +1228,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // phones): the OS shows + rings the notification, the tap opens the app here.
   const showIncomingCallFromData = useCallback((data: any) => {
     if (!data || data.type !== 'incoming_call' || !data.callId) return;
+    // Don't disturb a call that's already active/connected (would reset the
+    // ringing UI + duration). Only show if there's no call in progress.
+    if (activeCallRef.current || incomingCallRef.current) return;
     const callObj: any = {
       _id: data.callId,
       callRoomId: data.callRoomId,

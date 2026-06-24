@@ -188,6 +188,22 @@ router.put('/:callId/accept', auth, async (req, res) => {
     req.io.to(`user_${populatedCall.caller._id.toString()}`).emit('call_accepted', populatedCall);
 
     res.json(populatedCall);
+
+    // Clear the receiver's ringing notification (replace via same tag) so the
+    // lock-screen ringtone stops once the call is answered.
+    (async () => {
+      try {
+        const receiver = await User.findById(call.receiver).select('fcmTokens');
+        if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
+          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId }, {
+            title: 'On call',
+            body: 'Call connected',
+            channelId: 'nova_call_cancel',
+            tag: 'nova_call',
+          });
+        }
+      } catch (e) { /* ignore */ }
+    })();
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error accepting call' });
