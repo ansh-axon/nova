@@ -82,7 +82,7 @@ router.post('/initiate', auth, async (req, res) => {
         console.log(`[FCM] call initiate → recipient ${recipientId} has ${tokCount} fcmToken(s)`);
         if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
           // Ring with the recipient's chosen tone via its dedicated channel.
-          const TONE_IDS = ['pulse','chime','ripple','glow','beacon','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
+          const TONE_IDS = ['pulse','chime','ripple','glow','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
           const tone = (recipient.callRingtone && TONE_IDS.indexOf(recipient.callRingtone) >= 0) ? recipient.callRingtone : null;
           const ringChannelId = tone ? ('nova_call_' + tone) : 'nova_incoming_call_v3';
           const ringSound = tone || 'ring_call';

@@ -1,22 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, Dimensions, StatusBar, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Camera } from 'expo-camera';
+import { showNeonAlert } from '../../components/NeonAlert';
 import { useApp } from '../../context/AppContext';
 import { useIsFocused } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
 
 export default function CallsScreen() {
-  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall, markCallsSeen } = useApp();
+  const { user, callHistory, fetchCallHistory, initiateCallLog, endCallLog, users, fetchUsers, startGroupCall, markCallsSeen, activeCall, setActiveCall, setCallState, setCallDuration } = useApp();
   const isFocused = useIsFocused();
 
-  // Call simulation states
-  const [activeCall, setActiveCall] = useState<any | null>(null);
-  const [callState, setCallState] = useState<'ringing' | 'connected' | 'ended'>('ringing');
-  const [callDuration, setCallDuration] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeaker, setIsSpeaker] = useState(false);
-  const [isVideoOn, setIsVideoOn] = useState(true);
   const [loading, setLoading] = useState(false);
 
   // Group meeting starter states
@@ -55,62 +50,34 @@ export default function CallsScreen() {
     setSelectedIds([]);
   };
 
-  // Connect simulation transitions and duration timer
-  useEffect(() => {
-    let connectTimeout: NodeJS.Timeout;
-    let timerInterval: NodeJS.Timeout;
-
-    if (activeCall && callState === 'ringing') {
-      connectTimeout = setTimeout(() => {
-        setCallState('connected');
-      }, 3000); // ringing simulates for 3 seconds, then connects!
-    }
-
-    if (activeCall && callState === 'connected') {
-      timerInterval = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
-    }
-
-    return () => {
-      if (connectTimeout) clearTimeout(connectTimeout);
-      if (timerInterval) clearInterval(timerInterval);
-    };
-  }, [activeCall, callState]);
-
+  // Starts a REAL call (voice/video) via the global WebRTC call system; the
+  // in-call UI is rendered by GlobalCallHost (no simulation / auto-connect).
   const handleStartCall = async (targetUser: any, type: 'voice' | 'video') => {
     if (!targetUser) return;
-    
-    // 1. Write call initiation to backend DB
-    const callLogId = await initiateCallLog(targetUser._id || targetUser.id, type);
-
-    // 2. Open call overlay modal
-    setActiveCall({
-      id: callLogId,
-      user: targetUser,
-      type: type
-    });
+    if (type === 'video') {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        showNeonAlert({ title: 'PERMISSION DENIED', message: 'Camera access is required for video calling.', icon: 'videocam-outline', iconColor: '#f43f5e', borderColor: '#f43f5e' });
+        return;
+      }
+    }
     setCallState('ringing');
     setCallDuration(0);
-    setIsMuted(false);
-    setIsSpeaker(false);
-    setIsVideoOn(type === 'video');
-  };
-
-  const handleHangUp = async () => {
-    if (!activeCall) return;
-
-    setCallState('ended');
-
-    // Update call log on backend
-    if (activeCall.id) {
-      await endCallLog(activeCall.id, callDuration);
+    const tempCall = {
+      _id: `temp_${Date.now()}`,
+      caller: user,
+      receiver: targetUser,
+      callType: type,
+      status: 'ringing',
+      callRoomId: `room_${Date.now()}`,
+    };
+    setActiveCall(tempCall);
+    try {
+      const callData = await initiateCallLog(targetUser._id || targetUser.id, type);
+      if (callData) setActiveCall(callData);
+    } catch (err) {
+      console.log('Call log failed, but call UI continues:', err);
     }
-
-    // Dismiss call UI after showing "Call Ended" brief delay
-    setTimeout(() => {
-      setActiveCall(null);
-    }, 1200);
   };
 
   const formatDuration = (secs: number) => {
@@ -221,110 +188,7 @@ export default function CallsScreen() {
         />
       )}
 
-      {/* Cyberpunk Calling Overlay Modal */}
-      {activeCall && (
-        <Modal
-          animationType="fade"
-          transparent={false}
-          visible={true}
-          onRequestClose={handleHangUp}
-        >
-          <StatusBar hidden />
-          <View style={styles.modalContainer}>
-            {/* Holographic glowing lines decor */}
-            <View style={styles.hologramScanline} />
-
-            {/* Calling Info top */}
-            <View style={styles.modalHeader}>
-              <Ionicons name="lock-closed" size={14} color="rgba(0, 221, 255, 0.4)" style={{ marginRight: 6 }} />
-              <Text style={styles.modalSecText}>E2E SECURE LINK ACTIVE</Text>
-            </View>
-
-            {/* Avatar & Neon glowing circles */}
-            <View style={styles.callAvatarSection}>
-              <View style={[styles.avatarPulseCircle, callState === 'ringing' && styles.avatarPulseAnimation]}>
-                <View style={styles.avatarInnerContainer}>
-                  {activeCall.user.avatarUrl ? (
-                    <Image source={{ uri: activeCall.user.avatarUrl }} style={styles.callAvatarImage} />
-                  ) : (
-                    <View style={[styles.callAvatarFallback, { backgroundColor: getAvatarColor(activeCall.user.displayName || activeCall.user.username) }]}>
-                      <Text style={styles.callAvatarFallbackText}>
-                        {getInitials(activeCall.user.displayName || activeCall.user.username)}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              <Text style={styles.callingName}>
-                {activeCall.user.displayName || activeCall.user.username}
-              </Text>
-              
-              <Text style={[
-                styles.callingStatus,
-                callState === 'ringing' && { color: '#f59e0b' },
-                callState === 'connected' && { color: '#10b981' },
-                callState === 'ended' && { color: '#ef4444' }
-              ]}>
-                {callState === 'ringing' && 'RINGING UPLINK...'}
-                {callState === 'connected' && `CONNECTED • ${formatDuration(callDuration)}`}
-                {callState === 'ended' && 'CALL DISCONNECTED'}
-              </Text>
-            </View>
-
-            {/* Interactive Call Controls bottom */}
-            <View style={styles.callControlsContainer}>
-              <View style={styles.controlsRow}>
-                {/* Mute Button */}
-                <TouchableOpacity
-                  style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
-                  onPress={() => setIsMuted(!isMuted)}
-                >
-                  <Ionicons
-                    name={isMuted ? 'mic-off' : 'mic'}
-                    size={24}
-                    color={isMuted ? '#090d16' : '#fff'}
-                  />
-                  <Text style={styles.controlBtnLabel}>{isMuted ? 'Muted' : 'Mute'}</Text>
-                </TouchableOpacity>
-
-                {/* Speaker Button */}
-                <TouchableOpacity
-                  style={[styles.controlBtn, isSpeaker && styles.controlBtnActive]}
-                  onPress={() => setIsSpeaker(!isSpeaker)}
-                >
-                  <Ionicons
-                    name="volume-high"
-                    size={24}
-                    color={isSpeaker ? '#090d16' : '#fff'}
-                  />
-                  <Text style={styles.controlBtnLabel}>{isSpeaker ? 'Speaker On' : 'Speaker'}</Text>
-                </TouchableOpacity>
-
-                {/* Video camera toggle */}
-                {activeCall.type === 'video' && (
-                  <TouchableOpacity
-                    style={[styles.controlBtn, !isVideoOn && styles.controlBtnActive]}
-                    onPress={() => setIsVideoOn(!isVideoOn)}
-                  >
-                    <Ionicons
-                      name={isVideoOn ? 'videocam' : 'videocam-off'}
-                      size={24}
-                      color={!isVideoOn ? '#090d16' : '#fff'}
-                    />
-                    <Text style={styles.controlBtnLabel}>{isVideoOn ? 'Cam On' : 'Cam Off'}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Red Hangup button */}
-              <TouchableOpacity style={styles.hangUpCircle} onPress={handleHangUp}>
-                <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
+      {/* The active-call UI is rendered globally by GlobalCallHost (real WebRTC). */}
 
       {/* New Meeting Floating Button */}
       {!activeCall && (

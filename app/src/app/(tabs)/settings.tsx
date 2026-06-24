@@ -22,7 +22,6 @@ const BUILTIN_TONES: { id: string; name: string; kind: 'short' | 'ring'; module:
   { id: 'chime', name: 'Chime', kind: 'short', module: require('../../../assets/tones/chime.wav') },
   { id: 'ripple', name: 'Ripple', kind: 'short', module: require('../../../assets/tones/ripple.wav') },
   { id: 'glow', name: 'Glow', kind: 'short', module: require('../../../assets/tones/glow.wav') },
-  { id: 'beacon', name: 'Beacon (ring)', kind: 'ring', module: require('../../../assets/tones/beacon.wav') },
   { id: 'aurora', name: 'Aurora (ring)', kind: 'ring', module: require('../../../assets/tones/aurora.wav') },
   { id: 'marimba', name: 'Marimba (ring)', kind: 'ring', module: require('../../../assets/tones/marimba.wav') },
   { id: 'classic', name: 'Classic Ring', kind: 'ring', module: require('../../../assets/tones/classic.wav') },

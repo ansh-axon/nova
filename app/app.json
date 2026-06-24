@@ -2,7 +2,7 @@
   "expo": {
     "name": "NOVA",
     "slug": "nova-chat",
-    "version": "1.1.8",
+    "version": "1.1.9",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "app",
@@ -91,7 +91,6 @@
             "./assets/tones/chime.wav",
             "./assets/tones/ripple.wav",
             "./assets/tones/glow.wav",
-            "./assets/tones/beacon.wav",
             "./assets/tones/aurora.wav",
             "./assets/tones/marimba.wav",
             "./assets/tones/classic.wav",

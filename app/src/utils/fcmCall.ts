@@ -63,7 +63,7 @@ export async function ensureCallChannel(): Promise<void> {
 // closed-app call ring uses a notification CHANNEL sound, which Android freezes
 // at creation time — so each selectable ringtone needs its own channel.
 export const CALL_TONE_IDS = [
-  'pulse', 'chime', 'ripple', 'glow', 'beacon', 'aurora',
+  'pulse', 'chime', 'ripple', 'glow', 'aurora',
   'marimba', 'classic', 'bright', 'bubble', 'cool', 'melody', 'romantic',
 ];
 
