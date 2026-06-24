@@ -81,6 +81,12 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  // Chosen message tone id (maps to a per-tone notification channel so the
+  // selected tone sounds on the lock screen / when the app is closed).
+  messageRingtone: {
+    type: String,
+    default: ''
+  },
   // Users this user has blocked (they can't message each other)
   blockedUsers: {
     type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

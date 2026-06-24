@@ -34,7 +34,7 @@ const BUILTIN_TONES: { id: string; name: string; kind: 'short' | 'ring'; module:
 ];
 
 export default function SettingsScreen() {
-  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, customTones, setCustomTone, registerCallRingtone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts, appLockEnabled, toggleAppLock } = useApp();
+  const { user, updateProfile, logout, chatWallpaper, setChatWallpaper, selectedRingtone, setSelectedRingtone, customTones, setCustomTone, registerCallRingtone, registerMessageRingtone, privacyLastSeen, setPrivacyLastSeen, privacyReadReceipts, setPrivacyReadReceipts, appLockEnabled, toggleAppLock } = useApp();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [about, setAbout] = useState(user?.about || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
@@ -357,6 +357,11 @@ export default function SettingsScreen() {
       // the SAME tone rings on the lock screen / when the app is closed.
       if (kind === 'call') {
         try { await registerCallRingtone(preset.id); } catch (e) {}
+      }
+      // For the message tone, wire its notification channel so the SAME tone
+      // sounds on the lock screen / when the app is closed.
+      if (kind === 'message') {
+        try { await registerMessageRingtone(preset.id); } catch (e) {}
       }
       setPresetKind(null);
       showNeonAlert({

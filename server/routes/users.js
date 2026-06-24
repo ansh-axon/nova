@@ -41,6 +41,22 @@ router.post('/call-ringtone', auth, async (req, res) => {
   }
 });
 
+// @route   POST api/users/message-ringtone
+// @desc    Save the user's chosen message tone id (per-tone channel)
+router.post('/message-ringtone', auth, async (req, res) => {
+  const { ringtone } = req.body;
+  if (typeof ringtone !== 'string') {
+    return res.status(400).json({ message: 'ringtone id is required' });
+  }
+  try {
+    await User.findByIdAndUpdate(req.user.id, { messageRingtone: ringtone.trim().slice(0, 40) });
+    res.json({ message: 'Message tone saved' });
+  } catch (err) {
+    console.error('[FCM] message-ringtone error:', err.message);
+    res.status(500).json({ message: 'Server error saving message tone' });
+  }
+});
+
 // @route   POST api/users/fcm-token
 // @desc    Register a native FCM device token (for incoming-call data messages)
 router.post('/fcm-token', auth, async (req, res) => {

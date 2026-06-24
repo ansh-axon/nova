@@ -164,7 +164,7 @@ router.post('/', auth, async (req, res) => {
           .filter((p) => p.toString() !== req.user.id);
         if (recipientIds.length === 0) return;
 
-        const recipients = await User.find({ _id: { $in: recipientIds } }).select('pushTokens fcmTokens username');
+        const recipients = await User.find({ _id: { $in: recipientIds } }).select('pushTokens fcmTokens username messageRingtone');
 
         const senderName = populatedMessage.sender.displayName || populatedMessage.sender.username || 'New message';
         const preview = notifPreview(populatedMessage.messageType, text);
@@ -173,33 +173,38 @@ router.post('/', auth, async (req, res) => {
           : senderName;
         const body = conversation.isGroup ? `${senderName}: ${preview}` : preview;
 
+        // Built-in tone ids that have a dedicated per-tone notification channel
+        // (so the user's chosen message tone sounds on the lock screen).
+        const MSG_TONE_IDS = ['pulse','chime','ripple','glow','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
+
         // Prefer reliable FCM (rings/shows on lock screen & when app closed);
         // fall back to Expo push only for recipients without an FCM token.
-        const fcmTokens = [];
+        // Send PER-RECIPIENT so each gets their own chosen message tone.
         const expoTokens = [];
-        recipients.forEach((u) => {
-          if (u.username === AI_USERNAME) return;
+        const invalidAll = [];
+        for (const u of recipients) {
+          if (u.username === AI_USERNAME) continue;
           if (Array.isArray(u.fcmTokens) && u.fcmTokens.length > 0) {
-            fcmTokens.push(...u.fcmTokens);
+            const tone = (u.messageRingtone && MSG_TONE_IDS.indexOf(u.messageRingtone) >= 0) ? u.messageRingtone : null;
+            const channelId = tone ? ('nova_msg_' + tone) : 'nova_message';
+            const sound = tone || 'notif_message';
+            const invalid = await sendData(u.fcmTokens, {
+              type: 'message',
+              conversationId: conversationId.toString(),
+            }, {
+              title,
+              body,
+              channelId,
+              sound,
+              tag: 'msg_' + conversationId.toString(),
+            });
+            if (Array.isArray(invalid) && invalid.length > 0) invalidAll.push(...invalid);
           } else if (Array.isArray(u.pushTokens)) {
             expoTokens.push(...u.pushTokens);
           }
-        });
-
-        if (fcmTokens.length > 0) {
-          const invalid = await sendData(fcmTokens, {
-            type: 'message',
-            conversationId: conversationId.toString(),
-          }, {
-            title,
-            body,
-            channelId: 'nova_message',
-            sound: 'notif_message',
-            tag: 'msg_' + conversationId.toString(),
-          });
-          if (Array.isArray(invalid) && invalid.length > 0) {
-            await User.updateMany({ _id: { $in: recipientIds } }, { $pull: { fcmTokens: { $in: invalid } } });
-          }
+        }
+        if (invalidAll.length > 0) {
+          await User.updateMany({ _id: { $in: recipientIds } }, { $pull: { fcmTokens: { $in: invalidAll } } });
         }
 
         if (expoTokens.length > 0) {

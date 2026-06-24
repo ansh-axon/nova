@@ -107,11 +107,47 @@ export async function ensureToneCallChannel(toneId: string): Promise<string> {
   return id;
 }
 
+// ── Per-tone MESSAGE notification channels ──────────────────────────────
+// Same idea as calls: Android freezes a channel's sound at creation time, so
+// each selectable message tone needs its own channel to sound on the lock
+// screen / when the app is closed.
+export const MESSAGE_TONE_IDS = CALL_TONE_IDS;
+
+export function messageChannelIdForTone(toneId?: string | null): string {
+  if (toneId && MESSAGE_TONE_IDS.indexOf(toneId) >= 0) return 'nova_msg_' + toneId;
+  return 'nova_message';
+}
+
+// Creates (once) the per-tone message channel so its sound plays for incoming
+// message notifications on the lock screen. No-op for unknown ids.
+export async function ensureToneMessageChannel(toneId: string): Promise<string> {
+  if (Platform.OS !== 'android' || MESSAGE_TONE_IDS.indexOf(toneId) < 0) return 'nova_message';
+  const id = 'nova_msg_' + toneId;
+  await notifee.createChannel({
+    id,
+    name: 'Messages (' + toneId + ')',
+    importance: AndroidImportance.HIGH,
+    sound: toneId,
+    vibration: true,
+    vibrationPattern: [300, 500],
+  });
+  return id;
+}
+
 // Persisted id of the user's chosen call ringtone (so it can be re-applied and
 // re-uploaded to the server on every app start).
 const CALL_RINGTONE_KEY = 'call_ringtone_id_v1';
 export async function setSelectedCallRingtone(id: string): Promise<void> {
   try { await AsyncStorage.setItem(CALL_RINGTONE_KEY, id); } catch (e) {}
+}
+
+// Persisted id of the user's chosen message tone.
+const MESSAGE_RINGTONE_KEY = 'message_ringtone_id_v1';
+export async function setSelectedMessageRingtone(id: string): Promise<void> {
+  try { await AsyncStorage.setItem(MESSAGE_RINGTONE_KEY, id); } catch (e) {}
+}
+export async function getSelectedMessageRingtone(): Promise<string | null> {
+  try { return await AsyncStorage.getItem(MESSAGE_RINGTONE_KEY); } catch (e) { return null; }
 }
 export async function getSelectedCallRingtone(): Promise<string | null> {
   try { return await AsyncStorage.getItem(CALL_RINGTONE_KEY); } catch (e) { return null; }
