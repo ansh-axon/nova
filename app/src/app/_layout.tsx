@@ -110,6 +110,8 @@ function GlobalCallHost() {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
+  // Locked start time for the connected call (avoids resets + clock skew).
+  const callStartRef = useRef<number | null>(null);
 
   const handleSwitchCamera = useCallback(() => {
     if (localStream) {
@@ -125,21 +127,32 @@ function GlobalCallHost() {
   }, [localStream]);
 
   // Call duration timer.
-  // Derive elapsed time from the server-provided `startedAt` timestamp (set when the
-  // call is accepted) so BOTH devices show the same duration. Previously each device
-  // counted locally from the moment it switched to 'connected', which happened at
-  // different times on caller vs receiver and caused the durations to drift apart.
+  // Counts elapsed seconds for the connected call. The start time is LOCKED once
+  // per call in a ref so later activeCall updates (WebRTC/ICE negotiation) can't
+  // reset a running countdown. We prefer the server `startedAt` so both devices
+  // stay aligned — but only when it isn't ahead of THIS device's clock. Cross-
+  // device clock skew (caller clock behind the server) would otherwise make the
+  // elapsed value negative and freeze the caller at 00:00, so in that case we
+  // fall back to the local connect moment.
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (callState === 'connected') {
-      const startedAtRaw = activeCall?.startedAt;
-      const startTime = startedAtRaw ? new Date(startedAtRaw).getTime() : Date.now();
+      if (callStartRef.current == null) {
+        const raw = activeCall?.startedAt;
+        const serverStart = raw ? new Date(raw).getTime() : NaN;
+        const now = Date.now();
+        callStartRef.current = (!isNaN(serverStart) && serverStart <= now) ? serverStart : now;
+      }
+      const startTime = callStartRef.current;
       const tick = () => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         setCallDuration(elapsed > 0 ? elapsed : 0);
       };
       tick(); // set immediately so UI doesn't show 00:00 for a second
       interval = setInterval(tick, 1000);
+    } else {
+      // Reset so the next call locks a fresh start time.
+      callStartRef.current = null;
     }
     return () => {
       if (interval) clearInterval(interval);

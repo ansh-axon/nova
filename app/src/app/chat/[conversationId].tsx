@@ -390,7 +390,10 @@ export default function ChatScreen() {
     unblockUser,
     clearChat,
     editMessage,
-    deleteMessageForEveryone
+    deleteMessageForEveryone,
+    users,
+    fetchUsers,
+    addGroupMember
   } = useApp();
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -410,6 +413,8 @@ export default function ChatScreen() {
   const recordStartRef = useRef<number>(0);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   // Live clock tick (updates every second) for the 30-day auto-purge countdown banner
   const [nowTick, setNowTick] = useState(Date.now());
@@ -438,6 +443,31 @@ export default function ChatScreen() {
   const otherParticipant = conversation?.participants.find((p) => p.id !== user?.id) || conversation?.participants[0];
   const isAI = otherParticipant?.username === 'meta_ai';
   const isUserBlocked = !!(otherParticipant && (user?.blockedUsers || []).includes(otherParticipant.id));
+
+  // Group member management (admin only — the server also enforces this).
+  const groupAdminId = (conversation as any)?.groupAdmin?._id || (conversation as any)?.groupAdmin?.id || (conversation as any)?.groupAdmin;
+  const isGroupAdmin = !!(conversation?.isGroup && user && groupAdminId && groupAdminId.toString() === user.id);
+  const memberIds = (conversation?.participants || []).map((p: any) => p.id || p._id);
+  const availableUsers = (users || []).filter(
+    (u: any) => u.id !== user?.id && u.username !== 'meta_ai' && !memberIds.includes(u.id)
+  );
+
+  const handleOpenAddMember = () => {
+    setShowChatMenu(false);
+    fetchUsers();
+    setShowAddMember(true);
+  };
+
+  const handleAddMember = async (memberId: string) => {
+    if (!conversationId || addingMember) return;
+    setAddingMember(true);
+    const ok = await addGroupMember(conversationId, memberId);
+    setAddingMember(false);
+    if (ok) {
+      setShowAddMember(false);
+      showNeonAlert({ title: 'MEMBER ADDED', message: 'The member has joined the group.', icon: 'person-add', iconColor: '#10b981', borderColor: '#10b981' });
+    }
+  };
 
   // Load message history on focus
   useEffect(() => {
@@ -1459,10 +1489,18 @@ export default function ChatScreen() {
         <TouchableOpacity style={styles.chatMenuOverlay} activeOpacity={1} onPress={() => setShowChatMenu(false)}>
           <View style={styles.chatMenuCard}>
             {conversation?.isGroup ? (
-              <TouchableOpacity style={styles.chatMenuItem} onPress={handleLeaveGroup}>
-                <Ionicons name="exit-outline" size={18} color="#f43f5e" />
-                <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Leave group</Text>
-              </TouchableOpacity>
+              <>
+                {isGroupAdmin && (
+                  <TouchableOpacity style={styles.chatMenuItem} onPress={handleOpenAddMember}>
+                    <Ionicons name="person-add-outline" size={18} color="#0df" />
+                    <Text style={[styles.chatMenuText, { color: '#0df' }]}>Add member</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.chatMenuItem} onPress={handleLeaveGroup}>
+                  <Ionicons name="exit-outline" size={18} color="#f43f5e" />
+                  <Text style={[styles.chatMenuText, { color: '#f43f5e' }]}>Leave group</Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <>
                 <TouchableOpacity style={styles.chatMenuItem} onPress={handleClearChat}>
@@ -1486,6 +1524,42 @@ export default function ChatScreen() {
             )}
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Add Member picker (group admin only) */}
+      <Modal visible={showAddMember} transparent animationType="slide" onRequestClose={() => setShowAddMember(false)}>
+        <View style={styles.addMemberBackdrop}>
+          <View style={styles.addMemberSheet}>
+            <View style={styles.addMemberHandle} />
+            <Text style={styles.addMemberTitle}>ADD MEMBER</Text>
+            <Text style={styles.addMemberSub}>Select a contact to add to "{conversation?.groupName || 'group'}"</Text>
+            <FlatList
+              data={availableUsers}
+              keyExtractor={(item: any) => item.id}
+              style={{ maxHeight: 360 }}
+              ListEmptyComponent={<Text style={styles.addMemberEmpty}>No more contacts to add.</Text>}
+              renderItem={({ item }: any) => {
+                const name = item.displayName || item.username;
+                return (
+                  <TouchableOpacity style={styles.addMemberRow} disabled={addingMember} onPress={() => handleAddMember(item.id)}>
+                    {item.avatarUrl ? (
+                      <Image source={{ uri: item.avatarUrl }} style={styles.addMemberAvatar} />
+                    ) : (
+                      <View style={styles.addMemberAvatarFb}>
+                        <Text style={styles.addMemberAvatarFbText}>{(name || '?').charAt(0).toUpperCase()}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.addMemberName}>{name}</Text>
+                    {addingMember ? <ActivityIndicator size="small" color="#0df" /> : <Ionicons name="add-circle" size={24} color="#0df" />}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+            <TouchableOpacity style={styles.addMemberCancel} onPress={() => setShowAddMember(false)}>
+              <Text style={styles.addMemberCancelText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* 30-Day Auto-Purge Live Countdown Banner */}
@@ -1925,6 +1999,92 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 15,
     fontWeight: '600',
+  },
+  addMemberBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  addMemberSheet: {
+    backgroundColor: '#0f172a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 28,
+    borderTopWidth: 1,
+    borderColor: 'rgba(0,221,255,0.2)',
+  },
+  addMemberHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#334155',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  addMemberTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  addMemberSub: {
+    color: '#64748b',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  addMemberEmpty: {
+    color: '#475569',
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  addMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  addMemberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  addMemberAvatarFb: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: '#0df',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addMemberAvatarFbText: {
+    color: '#090d16',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  addMemberName: {
+    flex: 1,
+    color: '#e2e8f0',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  addMemberCancel: {
+    marginTop: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+  },
+  addMemberCancelText: {
+    color: '#cbd5e1',
+    fontWeight: '700',
   },
   headerActionBtn: {
     padding: 10,

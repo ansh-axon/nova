@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getToken } from './tokenStore';
+import { displayIncomingCallKeep, endCallKeep } from './callkeep';
 
 const APP_PACKAGE = 'com.rahulverma.nova';
 const DEFAULT_SERVER = 'https://nova-server-wg9p.onrender.com';
@@ -311,8 +312,23 @@ export async function handleFcmDataMessage(remoteMessage: any): Promise<void> {
   const data = remoteMessage?.data || {};
   if (data.type === 'incoming_call') {
     await setPendingCall(data);
-    await displayIncomingCall(data);
+    // Present a SYSTEM-managed call (CallKeep) — the OS rings and, critically,
+    // stops the ring the moment we end the call (discipline). callRoomId is a
+    // UUID from the server and is reused as the CallKeep call id.
+    if (data.callRoomId) {
+      await displayIncomingCallKeep(String(data.callRoomId), String(data.callerName || 'NOVA'), {
+        callId: data.callId,
+        callType: data.callType,
+        callerId: data.callerId,
+        conversationId: data.conversationId,
+      });
+    } else {
+      // Fallback to the notifee notification if no room id (should not happen).
+      await displayIncomingCall(data);
+    }
   } else if (data.type === 'cancel_call') {
+    // Caller cut / call ended → stop the system ring instantly.
+    if (data.callRoomId) endCallKeep(String(data.callRoomId));
     await cancelIncomingCall();
     await clearPendingCall();
   }

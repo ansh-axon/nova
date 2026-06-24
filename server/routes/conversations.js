@@ -213,6 +213,16 @@ router.put('/:conversationId/add-member', auth, async (req, res) => {
       .populate('groupAdmin', 'username displayName avatarUrl');
 
     res.json(populatedConversation);
+
+    // Notify everyone (especially the new member) so the group appears/updates
+    // in their list immediately without needing an app restart.
+    try {
+      if (req.io) {
+        conversation.participants.forEach((pid) => {
+          req.io.to(`user_${pid.toString()}`).emit('group_updated', populatedConversation);
+        });
+      }
+    } catch (e) { /* best-effort */ }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error adding member' });
