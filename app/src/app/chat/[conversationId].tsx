@@ -1448,9 +1448,6 @@ export default function ChatScreen() {
           <TouchableOpacity style={styles.headerActionBtn} onPress={() => handleStartCall('voice')}>
             <Ionicons name="call-outline" size={22} color="#cbd5e1" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionBtn} onPress={() => handleStartCall('video')}>
-            <Ionicons name="videocam-outline" size={22} color="#cbd5e1" />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowChatMenu(true)}>
             <Ionicons name="ellipsis-vertical" size={20} color="#cbd5e1" />
           </TouchableOpacity>

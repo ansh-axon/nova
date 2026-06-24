@@ -1226,25 +1226,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Shows the in-app incoming-call screen from FCM call data. Used when the user
   // taps the system call notification (the reliable path on closed/locked
   // phones): the OS shows + rings the notification, the tap opens the app here.
-  const showIncomingCallFromData = useCallback((data: any) => {
+  const showIncomingCallFromData = useCallback(async (data: any) => {
     if (!data || data.type !== 'incoming_call' || !data.callId) return;
-    // Don't disturb a call that's already active/connected (would reset the
-    // ringing UI + duration). Only show if there's no call in progress.
+    // Don't disturb a call that's already active/connected.
+    if (activeCallRef.current || incomingCallRef.current) return;
+    // Verify the call is STILL ringing (not cut/missed) before showing the UI —
+    // so a stale notification tap doesn't open a dead call screen.
+    try {
+      const resp = await fetch(`${serverUrl}/api/calls/${data.callId}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (resp.ok) {
+        const call = await resp.json();
+        if (!call || call.status !== 'ringing') return; // cut / ended / missed
+      }
+    } catch (e) {}
     if (activeCallRef.current || incomingCallRef.current) return;
     const callObj: any = {
       _id: data.callId,
       callRoomId: data.callRoomId,
-      callType: data.callType === 'video' ? 'video' : 'voice',
+      callType: 'voice',
       caller: { _id: data.callerId, id: data.callerId, displayName: data.callerName, username: data.callerName, avatarUrl: '' },
       receiver: user,
       status: 'ringing',
     };
     setIncomingCall(callObj);
     setCallState('ringing');
-  }, [user]);
+  }, [user, serverUrl, token]);
+
+  // Checks the server for a still-ringing incoming call and shows the full-screen
+  // call UI. Called when the app opens / phone is unlocked, so a call that rang
+  // via a lock-screen notification opens full-screen once unlocked (and does NOT
+  // open if it was already cut/missed).
+  const checkActiveIncomingCall = useCallback(async () => {
+    if (!token || !user) return;
+    if (activeCallRef.current || incomingCallRef.current) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/calls/active-incoming`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!resp.ok) return;
+      const call = await resp.json();
+      if (call && call.status === 'ringing' && !activeCallRef.current && !incomingCallRef.current) {
+        setIncomingCall(call);
+        setCallState('ringing');
+      }
+    } catch (e) {}
+  }, [serverUrl, token, user]);
 
   // App opened by tapping the call notification (killed → getInitialNotification,
-  // background → onNotificationOpenedApp).
+  // background → onNotificationOpenedApp), and on unlock/foreground.
   useEffect(() => {
     if (!token || !user) return;
     messaging()
@@ -1254,8 +1285,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsub = messaging().onNotificationOpenedApp((rm: any) => {
       if (rm?.data?.type === 'incoming_call') showIncomingCallFromData(rm.data);
     });
-    return () => unsub();
-  }, [token, user, showIncomingCallFromData]);
+    // On unlock / app foreground, show a still-ringing call full-screen.
+    checkActiveIncomingCall();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') checkActiveIncomingCall();
+    });
+    return () => { unsub(); sub.remove(); };
+  }, [token, user, showIncomingCallFromData, checkActiveIncomingCall]);
 
 
   // Initialize and manage Socket.io connection

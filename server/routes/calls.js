@@ -137,6 +137,30 @@ router.post('/initiate', auth, async (req, res) => {
   }
 });
 
+// @route   GET api/calls/active-incoming
+// @desc    Return this user's still-ringing incoming call (last 45s), if any.
+//          Used when the app comes to the foreground (unlock) to show the
+//          full-screen call UI only when the call is still actually ringing.
+//          NOTE: must be declared BEFORE '/:callId' so it isn't captured by it.
+router.get('/active-incoming', auth, async (req, res) => {
+  try {
+    const cutoff = new Date(Date.now() - 45 * 1000);
+    const call = await Call.findOne({
+      receiver: req.user.id,
+      status: 'ringing',
+      createdAt: { $gte: cutoff },
+    })
+      .populate('caller', 'username displayName avatarUrl')
+      .populate('receiver', 'username displayName avatarUrl')
+      .sort({ createdAt: -1 });
+
+    res.json(call || null);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error fetching active incoming call' });
+  }
+});
+
 // @route   GET api/calls/:callId
 // @desc    Get call by ID for synchronization
 router.get('/:callId', auth, async (req, res) => {

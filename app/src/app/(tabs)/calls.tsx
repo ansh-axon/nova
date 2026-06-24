@@ -14,10 +14,10 @@ export default function CallsScreen() {
 
   const [loading, setLoading] = useState(false);
 
-  // Group meeting starter states
+  // Group meeting starter states (voice only)
   const [showMeeting, setShowMeeting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [meetingType, setMeetingType] = useState<'voice' | 'video'>('video');
+  const meetingType: 'voice' | 'video' = 'voice';
 
   // Fetch call log history when focused
   useEffect(() => {
@@ -147,13 +147,13 @@ export default function CallsScreen() {
           </View>
         </View>
 
-        {/* Direct Redial Button */}
+        {/* Direct Redial Button — voice only */}
         <TouchableOpacity
           style={styles.callButton}
-          onPress={() => handleStartCall(otherParty, item.callType)}
+          onPress={() => handleStartCall(otherParty, 'voice')}
         >
           <Ionicons
-            name={item.callType === 'video' ? 'videocam-outline' : 'call-outline'}
+            name="call-outline"
             size={20}
             color="#0df"
           />
@@ -206,24 +206,6 @@ export default function CallsScreen() {
             <Text style={styles.pickerTitle}>NEW GROUP MEETING</Text>
             <Text style={styles.pickerSub}>Select up to 14 participants ({selectedIds.length}/14)</Text>
 
-            {/* Voice / Video toggle */}
-            <View style={styles.typeRow}>
-              <TouchableOpacity
-                style={[styles.typeBtn, meetingType === 'video' && styles.typeBtnActive]}
-                onPress={() => setMeetingType('video')}
-              >
-                <Ionicons name="videocam" size={18} color={meetingType === 'video' ? '#090d16' : '#cbd5e1'} />
-                <Text style={[styles.typeBtnText, meetingType === 'video' && styles.typeBtnTextActive]}>Video</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.typeBtn, meetingType === 'voice' && styles.typeBtnActive]}
-                onPress={() => setMeetingType('voice')}
-              >
-                <Ionicons name="call" size={18} color={meetingType === 'voice' ? '#090d16' : '#cbd5e1'} />
-                <Text style={[styles.typeBtnText, meetingType === 'voice' && styles.typeBtnTextActive]}>Voice</Text>
-              </TouchableOpacity>
-            </View>
-
             <FlatList
               data={otherUsers}
               keyExtractor={(item) => item.id}
@@ -261,7 +243,7 @@ export default function CallsScreen() {
                 onPress={handleStartMeeting}
                 disabled={selectedIds.length === 0}
               >
-                <Ionicons name="videocam" size={18} color="#090d16" style={{ marginRight: 6 }} />
+                <Ionicons name="call" size={18} color="#090d16" style={{ marginRight: 6 }} />
                 <Text style={styles.pickerStartText}>Start Meeting</Text>
               </TouchableOpacity>
             </View>
