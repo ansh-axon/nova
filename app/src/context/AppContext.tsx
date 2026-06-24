@@ -1074,22 +1074,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showNeonAlert({
         title: 'ALLOW CALLS WHEN CLOSED',
         message:
-          'For calls to ring full-screen even when NOVA is closed or your screen is locked:\n\n1) Tap "Allow" → choose YES (run in background).\n2) Tap "Full Screen" → turn ON for NOVA (so the call covers the lock screen).',
+          'NOVA needs to run in the background so calls ring even when the app is closed or your screen is locked.\n\nTap "Allow" and choose YES on the next screen.',
         icon: 'battery-charging-outline',
         borderColor: '#00ddff',
         iconColor: '#00ddff',
         buttons: [
           { text: 'Later', style: 'cancel' },
           {
-            text: 'Full Screen',
-            onPress: () => { openFullScreenIntentSettings(); },
-          },
-          {
             text: 'Allow',
             style: 'default',
             onPress: async () => {
               await AsyncStorage.setItem('call_setup_prompt_v2', 'done');
-              // One-tap system dialog: "Allow NOVA to ignore battery optimisations?"
               await requestIgnoreBatteryOptimizations();
             },
           },

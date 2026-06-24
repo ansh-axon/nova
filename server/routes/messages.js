@@ -7,6 +7,7 @@ const User = require('../models/User');
 const EncryptionManager = require('../utils/encryption');
 const { generateAIReply, AI_USERNAME } = require('../utils/aiAssistant');
 const { sendPush } = require('../utils/push');
+const { sendData } = require('../utils/fcmAdmin');
 
 // Builds a short notification preview from a message (never leaks long content).
 function notifPreview(messageType, text) {
@@ -163,12 +164,7 @@ router.post('/', auth, async (req, res) => {
           .filter((p) => p.toString() !== req.user.id);
         if (recipientIds.length === 0) return;
 
-        const recipients = await User.find({ _id: { $in: recipientIds } }).select('pushTokens username');
-        const tokens = [];
-        recipients.forEach((u) => {
-          if (u.username !== AI_USERNAME && Array.isArray(u.pushTokens)) tokens.push(...u.pushTokens);
-        });
-        if (tokens.length === 0) return;
+        const recipients = await User.find({ _id: { $in: recipientIds } }).select('pushTokens fcmTokens username');
 
         const senderName = populatedMessage.sender.displayName || populatedMessage.sender.username || 'New message';
         const preview = notifPreview(populatedMessage.messageType, text);
@@ -177,13 +173,44 @@ router.post('/', auth, async (req, res) => {
           : senderName;
         const body = conversation.isGroup ? `${senderName}: ${preview}` : preview;
 
-        await sendPush(tokens, {
-          title,
-          body,
-          channelId: 'messages-v2',
-          sound: 'notif_message.wav',
-          data: { type: 'message', conversationId: conversationId.toString() },
+        // Prefer reliable FCM (rings/shows on lock screen & when app closed);
+        // fall back to Expo push only for recipients without an FCM token.
+        const fcmTokens = [];
+        const expoTokens = [];
+        recipients.forEach((u) => {
+          if (u.username === AI_USERNAME) return;
+          if (Array.isArray(u.fcmTokens) && u.fcmTokens.length > 0) {
+            fcmTokens.push(...u.fcmTokens);
+          } else if (Array.isArray(u.pushTokens)) {
+            expoTokens.push(...u.pushTokens);
+          }
         });
+
+        if (fcmTokens.length > 0) {
+          const invalid = await sendData(fcmTokens, {
+            type: 'message',
+            conversationId: conversationId.toString(),
+          }, {
+            title,
+            body,
+            channelId: 'nova_message',
+            sound: 'notif_message',
+            tag: 'msg_' + conversationId.toString(),
+          });
+          if (Array.isArray(invalid) && invalid.length > 0) {
+            await User.updateMany({ _id: { $in: recipientIds } }, { $pull: { fcmTokens: { $in: invalid } } });
+          }
+        }
+
+        if (expoTokens.length > 0) {
+          await sendPush(expoTokens, {
+            title,
+            body,
+            channelId: 'messages-v2',
+            sound: 'notif_message.wav',
+            data: { type: 'message', conversationId: conversationId.toString() },
+          });
+        }
       } catch (e) {
         console.error('[PUSH] message push failed:', e.message);
       }

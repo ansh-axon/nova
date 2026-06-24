@@ -57,6 +57,22 @@ export async function ensureCallChannel(): Promise<void> {
     vibrationPattern: [400, 1000, 400, 1000],
     bypassDnd: true,
   });
+  // Silent channel used to REPLACE (clear) the ringing call notification when a
+  // call is cut/missed — stops the ring and shows a quiet "Missed call".
+  await notifee.createChannel({
+    id: 'nova_call_cancel',
+    name: 'Call Updates',
+    importance: AndroidImportance.LOW,
+    vibration: false,
+  });
+  // Channel for chat message notifications (lock-screen / app-closed alerts).
+  await notifee.createChannel({
+    id: 'nova_message',
+    name: 'Messages',
+    importance: AndroidImportance.HIGH,
+    sound: 'notif_message',
+    vibration: true,
+  });
 }
 
 // Built-in tones bundled as notification (res/raw) sounds. The lock-screen /
