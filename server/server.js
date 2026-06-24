@@ -442,13 +442,13 @@ const startSelfKeepAlive = () => {
     console.log('[KeepAlive] No RENDER_EXTERNAL_URL/SELF_URL set — self keep-alive disabled (local dev).');
     return;
   }
-  const TEN_MIN = 10 * 60 * 1000;
+  const PING_INTERVAL = 4 * 60 * 1000; // every 4 min — well under Render's 15-min idle spin-down
   setInterval(() => {
     fetch(`${selfUrl}/ping`)
       .then(() => console.log('[KeepAlive] self-ping ok'))
       .catch((e) => console.log('[KeepAlive] self-ping failed:', e.message));
-  }, TEN_MIN);
-  console.log(`[KeepAlive] self-ping enabled every 10 min -> ${selfUrl}/ping`);
+  }, PING_INTERVAL);
+  console.log(`[KeepAlive] self-ping enabled every 4 min -> ${selfUrl}/ping`);
 };
 
 startServer();
