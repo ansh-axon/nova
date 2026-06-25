@@ -17,7 +17,6 @@ import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
 import messaging from '@react-native-firebase/messaging';
 import notifee, { EventType } from '@notifee/react-native';
 import { registerForFcm, getPendingCall, clearPendingCall, cancelIncomingCall, setPendingCall, isBatteryOptimized, requestIgnoreBatteryOptimizations, ensureToneCallChannel, setSelectedCallRingtone, getSelectedCallRingtone, openFullScreenIntentSettings, ensureToneMessageChannel, setSelectedMessageRingtone, getSelectedMessageRingtone } from '../utils/fcmCall';
-import { setupCallKeep, displayIncomingCallKeep, endCallKeep, setCallKeepConnected, registerCallKeepHandlers, getPendingAnswer, clearPendingAnswer } from '../utils/callkeep';
 
 // A reference to a user-picked tone file stored in the app's documents dir.
 export interface ToneRef { uri: string; name: string }
@@ -689,10 +688,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveCall(data);
         setCallState('connected');
         setIncomingCall(null);
-        // Tell the OS the system call is now connected → stops the ring and
-        // dismisses the native incoming screen, bringing NOVA forward.
-        if (data?.callRoomId) setCallKeepConnected(String(data.callRoomId));
-        await clearPendingAnswer();
         // DO NOT call initPeerConnection here!
         // Receiver B waits for Caller A's webrtc_offer, which lazily creates B's PeerConnection.
         // Calling it here caused a race condition: B's initPeerConnection would lock isInitializingRef,
@@ -706,8 +701,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const rejectCall = async (callId: string) => {
     try {
       cleanupCallStreams();
-      endCallKeep(activeCallRef.current?.callRoomId || incomingCallRef.current?.callRoomId);
-      await clearPendingAnswer();
       await fetch(`${serverUrl}/api/calls/${callId}/reject`, {
         method: 'PUT',
         headers: {
@@ -729,8 +722,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const endCall = async (callId: string, duration: number) => {
     try {
       cleanupCallStreams();
-      endCallKeep(activeCallRef.current?.callRoomId || incomingCallRef.current?.callRoomId);
-      await clearPendingAnswer();
       
       // Reset audio mode to default
       try {
@@ -766,43 +757,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Latest call actions, kept in a ref so the (mount-once) CallKeep listeners
-  // always call the current functions without stale closures.
-  const callActionsRef = useRef<any>({});
-  callActionsRef.current = { acceptCall, rejectCall, endCall };
-
-  // Wire the native (CallKeep) call buttons + start the system-call engine.
-  // Answering on the OS call screen accepts the NOVA call; ending rejects/hangs
-  // up. The OS ring stops automatically when the call ends (the "discipline").
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    setupCallKeep();
-    const cleanup = registerCallKeepHandlers({
-      onAnswer: async (callRoomId: string) => {
-        let callId = incomingCallRef.current?._id || incomingCallRef.current?.id;
-        if (!callId) {
-          const p = await getPendingAnswer();
-          callId = p?.callId;
-        }
-        if (callId) callActionsRef.current.acceptCall?.(callId);
-      },
-      onEnd: async (callRoomId: string) => {
-        const active = activeCallRef.current;
-        if (active && (active.status === 'accepted' || active.startedAt)) {
-          callActionsRef.current.endCall?.(active._id || active.id, 0);
-        } else {
-          let callId = incomingCallRef.current?._id || incomingCallRef.current?.id;
-          if (!callId) {
-            const p = await getPendingAnswer();
-            callId = p?.callId;
-          }
-          if (callId) callActionsRef.current.rejectCall?.(callId);
-          await clearPendingAnswer();
-        }
-      },
-    });
-    return cleanup;
-  }, []);
+  // ──────────────────────────────────────────────────────────────
+  // GROUP / MEETING CALLS (mesh): each participant holds a direct
   // PeerConnection to every other participant. Good for ~4-6 video
   // and more for voice. The server only relays signaling.
   // ──────────────────────────────────────────────────────────────
@@ -1226,10 +1182,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // so here we only dismiss a full-screen notification if the call cancelled.
     const unsub = messaging().onMessage(async (rm: any) => {
       const data: any = rm?.data || {};
-      if (data.type === 'cancel_call') {
-        if (data.callRoomId) endCallKeep(String(data.callRoomId));
-        await cancelIncomingCall();
-      }
+      if (data.type === 'cancel_call') await cancelIncomingCall();
     });
 
     return () => { cancelled = true; unsub(); unsubToken(); };
@@ -1557,15 +1510,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.log('Socket incoming call received:', data);
       setIncomingCall(data);
       setCallState('ringing');
-      // Ring via the SYSTEM call (CallKeep) so it loops and STOPS the moment the
-      // caller cuts / we accept. callRoomId is a server UUID, reused as the id.
-      if (data?.callRoomId) {
-        const cn = (data.caller && (data.caller.displayName || data.caller.username)) || 'NOVA';
-        displayIncomingCallKeep(String(data.callRoomId), cn, {
-          callId: data._id || data.id,
-          callType: data.callType,
-        });
-      }
     });
 
     // A group was created/updated (e.g. admin added this user) → refresh the
@@ -1610,7 +1554,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     socketInstance.on('call_rejected', () => {
       console.log('Socket call rejected received');
-      endCallKeep(activeCallRef.current?.callRoomId || incomingCallRef.current?.callRoomId);
       setCallState('ended');
       cleanupCallStreams();
       setTimeout(() => {
@@ -1622,7 +1565,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     socketInstance.on('call_ended', () => {
       console.log('Socket call ended received');
-      endCallKeep(activeCallRef.current?.callRoomId || incomingCallRef.current?.callRoomId);
       setCallState('ended');
       cleanupCallStreams();
       setTimeout(() => {
@@ -1857,14 +1799,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let autoEndTimer: any = null;
     if (callState === 'ringing') {
       if (incomingCall) {
-        // We are receiving the call (Receiver B). On Android the SYSTEM call
-        // (CallKeep) already rings + vibrates and stops exactly when the caller
-        // cuts — so skip the in-app ring here to avoid a double ring. On other
-        // platforms, ring in-app.
-        if (Platform.OS !== 'android') {
-          playCallSound('ringing');
-          Vibration.vibrate([0, 800, 1000], true);
-        }
+        // We are receiving the call (Receiver B) -> Play Ringtone + vibrate the phone.
+        // Vibration is a guaranteed alert even if the network audio fails to load.
+        playCallSound('ringing');
+        // Repeating pattern: wait 0ms, vibrate 800ms, pause 1000ms, ... (loop)
+        Vibration.vibrate([0, 800, 1000], true);
       } else {
         // We are making the call (Caller A) -> Play Dialing tone
         playCallSound('dialing');

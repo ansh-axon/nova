@@ -102,11 +102,13 @@ router.post('/initiate', auth, async (req, res) => {
         const tokCount = Array.isArray(recipient.fcmTokens) ? recipient.fcmTokens.length : 0;
         console.log(`[FCM] call initiate → recipient ${recipientId} has ${tokCount} fcmToken(s)`);
         if (Array.isArray(recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
-          // DATA-ONLY high-priority message → the app's background handler runs
-          // and presents a SYSTEM call (CallKeep), which rings and — crucially —
-          // stops the ring the instant the call ends. (A notification payload
-          // would make the OS show it instead and the background handler would
-          // NOT run, so CallKeep could never take over.)
+          // Notification payload (OS-shown) → reliably rings + shows on the lock
+          // screen even when the app is closed. A fixed `tag` lets a later
+          // cancel message REPLACE (clear) this ringing notification.
+          const TONE_IDS = ['pulse','chime','ripple','glow','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
+          const tone = (recipient.callRingtone && TONE_IDS.indexOf(recipient.callRingtone) >= 0) ? recipient.callRingtone : null;
+          const ringChannelId = tone ? ('nova_call_' + tone) : 'nova_incoming_call_v3';
+          const ringSound = tone || 'ring_call';
           const invalidTokens = await sendData(recipient.fcmTokens, {
             type: 'incoming_call',
             callId: call._id.toString(),
@@ -115,6 +117,12 @@ router.post('/initiate', auth, async (req, res) => {
             callerName,
             callerId: req.user.id,
             conversationId: conversationId || '',
+          }, {
+            title: `Incoming ${callType === 'video' ? 'video' : 'voice'} call`,
+            body: `${callerName} is calling you on NOVA`,
+            channelId: ringChannelId,
+            sound: ringSound,
+            tag: 'nova_call',
           });
           // Prune tokens FCM reported as permanently invalid (e.g. reinstalled app).
           if (Array.isArray(invalidTokens) && invalidTokens.length > 0) {
@@ -226,13 +234,18 @@ router.put('/:callId/accept', auth, async (req, res) => {
 
     res.json(populatedCall);
 
-    // Stop the receiver's SYSTEM ring once the call is answered (data-only →
-    // background handler ends the CallKeep call → ring stops instantly).
+    // Clear the receiver's ringing notification (replace via same tag) so the
+    // lock-screen ringtone stops once the call is answered.
     (async () => {
       try {
         const receiver = await User.findById(call.receiver).select('fcmTokens');
         if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
-          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId }, {
+            title: 'On call',
+            body: 'Call connected',
+            channelId: 'nova_call_cancel',
+            tag: 'nova_call',
+          });
         }
       } catch (e) { /* ignore */ }
     })();
@@ -272,13 +285,19 @@ router.put('/:callId/reject', auth, async (req, res) => {
 
     res.json(populatedCall);
 
-    // Stop the receiver's SYSTEM ring (data-only → background handler ends the
-    // CallKeep call → ring stops instantly; shows as missed in the call log).
+    // Clear the ringing notification on the receiver's device by REPLACING it
+    // (same tag) with a silent "Missed call" — works on lock screen / killed.
     (async () => {
       try {
         const receiver = await User.findById(call.receiver).select('fcmTokens');
         if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
-          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+          const cn = (populatedCall.caller && (populatedCall.caller.displayName || populatedCall.caller.username)) || 'Someone';
+          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId }, {
+            title: 'Missed call',
+            body: `${cn} tried to call you on NOVA`,
+            channelId: 'nova_call_cancel',
+            tag: 'nova_call',
+          });
         }
       } catch (e) { /* ignore */ }
     })();
@@ -330,14 +349,24 @@ router.put('/:callId/end', auth, async (req, res) => {
 
     res.json(populatedCall);
 
-    // Caller cancelled / call ended → stop the receiver's SYSTEM ring instantly
-    // (data-only → background handler ends the CallKeep call). An unanswered
-    // call still shows as missed in the in-app call log.
+    // Caller cancelled / call ended → clear the receiver's ringing notification.
+    // If it was never answered, REPLACE it (same tag) with a silent "Missed
+    // call"; otherwise just send a data cancel to dismiss it.
     (async () => {
       try {
         const receiver = await User.findById(call.receiver).select('fcmTokens');
         if (receiver && Array.isArray(receiver.fcmTokens) && receiver.fcmTokens.length > 0) {
-          await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+          if (wasRinging) {
+            const cn = (populatedCall.caller && (populatedCall.caller.displayName || populatedCall.caller.username)) || 'Someone';
+            await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId }, {
+              title: 'Missed call',
+              body: `${cn} tried to call you on NOVA`,
+              channelId: 'nova_call_cancel',
+              tag: 'nova_call',
+            });
+          } else {
+            await sendData(receiver.fcmTokens, { type: 'cancel_call', callRoomId: call.callRoomId });
+          }
         }
       } catch (e) { /* ignore */ }
     })();
