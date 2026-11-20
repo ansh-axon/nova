@@ -209,6 +209,126 @@ const AudioMemoBubble = React.memo(({ uri }: { uri: string }) => {
   );
 });
 
+// MODULE-LEVEL video message bubble.
+// Checks if the video is already downloaded in local cache. If not, prompts user
+// to download with a tap and displays download progress. Once downloaded, plays
+// directly from the local file so playback is 100% instant, smooth, and never stutters.
+const ChatVideoBubble = React.memo(({ 
+  uri, 
+  onOpenFullView 
+}: { 
+  uri: string; 
+  onOpenFullView: (localPath: string) => void;
+}) => {
+  const isLocalUri = uri.startsWith('file://');
+  const [localUri, setLocalUri] = useState<string | null>(isLocalUri ? uri : null);
+  const [downloading, setDownloading] = useState(false);
+  const [progressPercent, setProgressPercent] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const cacheDir = FileSystem.cacheDirectory + 'nova_videos/';
+  const safeName = (uri.split('?')[0].split('/').pop() || `vid_${Date.now()}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const cachePath = cacheDir + safeName;
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        if (isLocalUri) {
+          setLocalUri(uri);
+          return;
+        }
+        const info = await FileSystem.getInfoAsync(cachePath);
+        if (info.exists && mounted) {
+          setLocalUri(cachePath);
+        }
+      } catch (e) {
+        console.warn('Check cached video error:', e);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [uri]);
+
+  const handleDownloadAndPlay = async () => {
+    if (localUri) {
+      onOpenFullView(localUri);
+      return;
+    }
+    if (downloading) return;
+    setDownloading(true);
+    setFailed(false);
+    setProgressPercent(0);
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+      }
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        uri,
+        cachePath,
+        {},
+        (downloadProgress) => {
+          const total = downloadProgress.totalBytesExpectedToWrite;
+          if (total > 0) {
+            const p = Math.round((downloadProgress.totalBytesWritten / total) * 100);
+            setProgressPercent(p);
+          }
+        }
+      );
+
+      const res = await downloadResumable.downloadAsync();
+      if (res && res.status >= 200 && res.status < 300) {
+        setLocalUri(cachePath);
+        setDownloading(false);
+        setProgressPercent(null);
+        onOpenFullView(cachePath);
+      } else {
+        setFailed(true);
+        setDownloading(false);
+        setProgressPercent(null);
+      }
+    } catch (e) {
+      console.warn('Video download error:', e);
+      setFailed(true);
+      setDownloading(false);
+      setProgressPercent(null);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={styles.videoBubbleWrapper}
+      activeOpacity={0.85}
+      onPress={handleDownloadAndPlay}
+      disabled={downloading}
+    >
+      <View style={styles.videoPlayerPlaceholder}>
+        {downloading ? (
+          <View style={{ alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#0df" />
+            <Text style={styles.videoPlaceholderText}>
+              {progressPercent !== null ? `Downloading ${progressPercent}%...` : 'Downloading video...'}
+            </Text>
+          </View>
+        ) : localUri ? (
+          <View style={{ alignItems: 'center' }}>
+            <Ionicons name="play-circle" size={46} color="#0df" />
+            <Text style={[styles.videoPlaceholderText, { color: '#0df' }]}>▶ Play Video</Text>
+          </View>
+        ) : (
+          <View style={{ alignItems: 'center' }}>
+            <Ionicons name="cloud-download-outline" size={42} color="#0df" />
+            <Text style={styles.videoPlaceholderText}>
+              {failed ? 'Download Failed • Tap Retry' : 'Tap to Download Video'}
+            </Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 // Persistent in-memory poll vote cache keyed by messageId
 const pollVoteCache: Record<string, { selectedOpt: string; votes: any[] }> = {};
 
@@ -928,6 +1048,15 @@ export default function ChatScreen() {
       try {
         const uploadResult = await uploadFile(uri, 'video/mp4');
         if (uploadResult && uploadResult.url) {
+          try {
+            const cacheDir = FileSystem.cacheDirectory + 'nova_videos/';
+            const safeName = (uploadResult.url.split('?')[0].split('/').pop() || `vid_${Date.now()}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+            if (!dirInfo.exists) await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+            await FileSystem.copyAsync({ from: uri, to: cacheDir + safeName });
+          } catch (e) {
+            console.warn('Sender video cache copy error:', e);
+          }
           await sendMessage(conversationId, `📹 Video Shared${duration ? ` (${duration})` : ''} • Encrypted 🔒`, 'video', uploadResult.url);
         }
       } catch (e) {
@@ -1453,21 +1582,13 @@ export default function ChatScreen() {
                 <Image source={{ uri: mediaSourceUri }} style={styles.bubbleImage} resizeMode="cover" />
               </TouchableOpacity>
             ) : isVideo ? (
-              <TouchableOpacity
-                style={styles.videoBubbleWrapper}
-                activeOpacity={0.85}
-                onPress={() => {
-                  if (mediaSourceUri) {
-                    setFullViewVideoUri(mediaSourceUri);
-                    setShowVideoModal(true);
-                  }
+              <ChatVideoBubble
+                uri={mediaSourceUri}
+                onOpenFullView={(localPath) => {
+                  setFullViewVideoUri(localPath);
+                  setShowVideoModal(true);
                 }}
-              >
-                <View style={styles.videoPlayerPlaceholder}>
-                  <Ionicons name="play-circle" size={48} color="#0df" />
-                  <Text style={styles.videoPlaceholderText}>Tap to Stream Video Uplink</Text>
-                </View>
-              </TouchableOpacity>
+              />
             ) : isAudio ? (
               <AudioMemoBubble uri={mediaSourceUri} />
             ) : (

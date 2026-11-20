@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, Dimensions, StatusBar, TextInput, ActivityIndicator, DeviceEventEmitter } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
@@ -6,7 +6,7 @@ import { useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getCachedMedia, cacheMedia } from '../../utils/mediaCache';
+import { getCachedMedia, cacheMedia, saveLocalMediaCopy, getSyncCachedMedia } from '../../utils/mediaCache';
 import { showNeonAlert } from '../../components/NeonAlert';
 
 const { width, height } = Dimensions.get('window');
@@ -20,37 +20,28 @@ const { width, height } = Dimensions.get('window');
 const StatusVideoPlayer = React.memo(({ 
   uri, 
   shouldPlay, 
-  startTime = 0,
-  targetDuration,
+  onDuration, 
   onBufferingChange,
-  onProgress,
   onFinished
 }: {
   uri: string;
   shouldPlay: boolean;
-  startTime?: number;
-  targetDuration?: number;
+  onDuration?: (ms: number) => void;
   onBufferingChange?: (buffering: boolean) => void;
-  onProgress?: (progress: number) => void;
   onFinished?: () => void;
 }) => {
   const [buffering, setBuffering] = useState(true);
-  const videoRef = useRef<Video>(null);
-  const finishedRef = useRef(false);
+  const reportedRef = useRef(false);
 
   useEffect(() => {
-    finishedRef.current = false;
+    reportedRef.current = false;
     setBuffering(true);
     onBufferingChange?.(true);
-    if (startTime > 0 && videoRef.current) {
-      videoRef.current.setPositionAsync(startTime).catch(() => {});
-    }
-  }, [uri, startTime]);
+  }, [uri]);
 
   return (
     <>
       <Video
-        ref={videoRef}
         source={{ uri }}
         rate={1.0}
         volume={1.0}
@@ -58,9 +49,7 @@ const StatusVideoPlayer = React.memo(({
         resizeMode={ResizeMode.CONTAIN}
         shouldPlay={shouldPlay}
         isLooping={false}
-        progressUpdateIntervalMillis={100}
         style={styles.viewerVideo}
-        positionMillis={startTime || 0}
         onLoadStart={() => {
           setBuffering(true);
           onBufferingChange?.(true);
@@ -70,14 +59,11 @@ const StatusVideoPlayer = React.memo(({
             const isBuff = !!status.isBuffering && !status.isPlaying;
             setBuffering(isBuff);
             onBufferingChange?.(isBuff);
-
-            const duration = targetDuration || Math.min(30000, Math.max(1000, (status.durationMillis || 30000) - (startTime || 0)));
-            const currentOffset = Math.max(0, (status.positionMillis || 0) - (startTime || 0));
-            const p = Math.min(1, Math.max(0, currentOffset / duration));
-            onProgress?.(p);
-
-            if ((status.didJustFinish || currentOffset >= duration) && !finishedRef.current) {
-              finishedRef.current = true;
+            if (status.durationMillis && !reportedRef.current) {
+              reportedRef.current = true;
+              onDuration?.(status.durationMillis);
+            }
+            if (status.didJustFinish) {
               onFinished?.();
             }
           }
@@ -102,33 +88,30 @@ export default function StatusScreen() {
   const [progress, setProgress] = useState(0);
   const [groupedStatuses, setGroupedStatuses] = useState<any[]>([]);
   const [showViewers, setShowViewers] = useState(false);
-  const [videoBuffering, setVideoBuffering] = useState(false);
-  // Locally-cached video source for the current story (keyed by story id) so a
-  // video streams the first time, then plays from local cache on later views.
-  const [videoCache, setVideoCache] = useState<{ id: string; uri: string } | null>(null);
-  // Duration of the current video story (drives the time-based progress bar).
-  const [videoDurationMs, setVideoDurationMs] = useState(0);
+  const videoBufferingRef = useRef<boolean>(false);
+  const videoDurationRef = useRef<number>(0);
+
+  // Active story source resolution (memoized per story so it never changes mid-playback)
+  const currentStoryItem = selectedGroup?.stories?.[currentStoryIndex];
+  const currentStoryId = currentStoryItem?._id;
+  const currentStoryMediaUrl = currentStoryItem?.mediaUrl;
+
+  const resolvedVideoUri = useMemo(() => {
+    if (!currentStoryMediaUrl) return '';
+    const remote = currentStoryMediaUrl.startsWith('http') ? currentStoryMediaUrl : `${serverUrl}${currentStoryMediaUrl}`;
+    const local = getSyncCachedMedia(remote);
+    if (!local) {
+      // Pre-fetch into disk cache so subsequent views play from local flash storage instantly
+      cacheMedia(remote).catch(() => {});
+    }
+    return local || remote;
+  }, [currentStoryId, currentStoryMediaUrl, serverUrl]);
 
   // Text status creator states
   const [showTextModal, setShowTextModal] = useState(false);
   const [textStatusInput, setTextStatusInput] = useState('');
   const [selectedBgIndex, setSelectedBgIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
-
-  // Video trimmer & preview modal states (supports custom 30s segment selection)
-  const [videoToTrim, setVideoToTrim] = useState<{
-    uri: string;
-    durationMs: number;
-    mimeType: string;
-  } | null>(null);
-  const [trimStartTimeMs, setTrimStartTimeMs] = useState(0);
-
-  const formatMs = (ms: number) => {
-    const totalSecs = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(totalSecs / 60);
-    const s = totalSecs % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
 
   const neonBgs = [
     { name: 'Teal', bg: '#083344', text: '#0df' },
@@ -261,57 +244,46 @@ export default function StatusScreen() {
     setGroupedStatuses(array);
   }, [statuses, user]);
 
-  // Resolve the best source for the current video story: use the local cached
-  // copy if we have it (smooth, instant), otherwise stream from the server the
-  // first time and cache it in the background for next time.
-  useEffect(() => {
-    const cur = selectedGroup?.stories?.[currentStoryIndex];
-    if (!cur || cur.statusType !== 'video' || !cur.mediaUrl) {
-      setVideoDurationMs(0);
-      setVideoBuffering(false);
-      return;
-    }
-    setVideoDurationMs(0); // reset; wait for the new video to report its duration
-    setVideoBuffering(true);
-    const remote = cur.mediaUrl.startsWith('http') ? cur.mediaUrl : `${serverUrl}${cur.mediaUrl}`;
-    let active = true;
-    (async () => {
-      const cached = await getCachedMedia(remote);
-      if (!active) return;
-      if (cached) {
-        setVideoCache({ id: cur._id, uri: cached });
-      } else {
-        setVideoCache({ id: cur._id, uri: remote });
-        // Download in the background so the next view plays from local cache.
-        cacheMedia(remote).catch(() => {});
-      }
-    })();
-    return () => { active = false; };
-  }, [selectedGroup, currentStoryIndex, serverUrl]);
-
   // Story auto-progress:
-  // For images and text, tick a smooth 5000ms bar.
-  // For video stories, StatusVideoPlayer directly drives onVideoProgress and onVideoFinished
-  // ensuring the entire video (up to 30s) plays smoothly without being prematurely cut off.
+  // Smooth, rock-solid time-based progress bar for BOTH images/text (5s) and videos (up to 30s).
+  // Driven by a dedicated JavaScript interval that NEVER freezes or gets stuck.
   useEffect(() => {
     if (!selectedGroup) return;
     const cur = selectedGroup.stories?.[currentStoryIndex];
-    if (cur?.statusType === 'video') return; // Handled 1:1 by StatusVideoPlayer!
+    if (!cur) return;
+    const isVideoStory = cur.statusType === 'video';
 
     setProgress(0);
-    const durationMs = 5000;
+    videoBufferingRef.current = isVideoStory;
+    videoDurationRef.current = (typeof cur.videoDuration === 'number' && cur.videoDuration > 0)
+      ? Math.min(30000, cur.videoDuration)
+      : 0;
+
     let elapsed = 0;
+    let initialBufferingWait = 0;
     const interval = setInterval(() => {
+      // While video is initial buffering at start (elapsed === 0), wait at most 1.2s before ticking
+      if (isVideoStory && videoBufferingRef.current && elapsed === 0) {
+        initialBufferingWait += 50;
+        if (initialBufferingWait < 1200) {
+          return;
+        }
+      }
+
       elapsed += 50;
-      const p = Math.min(1, elapsed / durationMs);
+      const dur = videoDurationRef.current > 0 ? Math.min(30000, videoDurationRef.current) : 30000;
+      const targetDuration = isVideoStory ? dur : 5000;
+      const p = Math.min(1, elapsed / targetDuration);
       setProgress(p);
+
       if (p >= 1) {
         clearInterval(interval);
         handleNextStory();
       }
     }, 50);
+
     return () => clearInterval(interval);
-  }, [selectedGroup, currentStoryIndex]);
+  }, [selectedGroup?.userId, currentStoryIndex]);
 
   // Keep selectedGroup in sync with live status updates (such as real-time viewers)
   useEffect(() => {
@@ -367,9 +339,14 @@ export default function StatusScreen() {
   // (and never re-buffers) just because the parent re-rendered for progress.
   const handleNextStoryRef = useRef(handleNextStory);
   handleNextStoryRef.current = handleNextStory;
-  const onVideoDuration = useCallback((ms: number) => setVideoDurationMs(ms), []);
-  const onBufferingChange = useCallback((buffering: boolean) => setVideoBuffering(buffering), []);
-  const onVideoProgress = useCallback((p: number) => setProgress(p), []);
+  const onVideoDuration = useCallback((ms: number) => {
+    if (ms > 0) {
+      videoDurationRef.current = ms;
+    }
+  }, []);
+  const onBufferingChange = useCallback((buffering: boolean) => {
+    videoBufferingRef.current = buffering;
+  }, []);
   const onVideoFinished = useCallback(() => {
     handleNextStoryRef.current();
   }, []);
@@ -438,6 +415,8 @@ export default function StatusScreen() {
           if (uploadResult && uploadResult.url) {
             const rawDur = asset.duration || 0;
             const dur = rawDur > 0 ? (rawDur < 1000 ? Math.round(rawDur * 1000) : Math.round(rawDur)) : 30000;
+            const remoteUrl = uploadResult.url.startsWith('http') ? uploadResult.url : `${serverUrl}${uploadResult.url}`;
+            if (isVid) await saveLocalMediaCopy(remoteUrl, uri);
             await uploadStatus({
               statusType: isVid ? 'video' : 'image',
               mediaUrl: uploadResult.url,
@@ -555,48 +534,41 @@ export default function StatusScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       allowsEditing: false,
       quality: 0.8,
+      videoMaxDuration: 30
     });
 
     if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      const rawDur = asset.duration || 0;
-      const durationMs = rawDur > 0 ? (rawDur < 1000 ? Math.round(rawDur * 1000) : Math.round(rawDur)) : 0;
-      setTrimStartTimeMs(0);
-      setVideoToTrim({
-        uri: asset.uri,
-        durationMs: durationMs || 30000,
-        mimeType: asset.mimeType || 'video/mp4'
-      });
-    }
-  };
-
-  const handleConfirmVideoUpload = async () => {
-    if (!videoToTrim) return;
-    setUploading(true);
-    try {
-      const uploadResult = await uploadFile(videoToTrim.uri, videoToTrim.mimeType);
-      if (uploadResult && uploadResult.url) {
-        const effectiveDuration = Math.min(30000, Math.max(1000, videoToTrim.durationMs - trimStartTimeMs));
-        await uploadStatus({
-          statusType: 'video',
-          mediaUrl: uploadResult.url,
-          startTime: trimStartTimeMs,
-          videoDuration: effectiveDuration,
-          textContent: ''
+      setUploading(true);
+      try {
+        const asset = result.assets[0];
+        const uri = asset.uri;
+        const mimeType = asset.mimeType || 'video/mp4';
+        const uploadResult = await uploadFile(uri, mimeType);
+        if (uploadResult && uploadResult.url) {
+          const rawDur = asset.duration || 0;
+          const dur = rawDur > 0 ? (rawDur < 1000 ? Math.round(rawDur * 1000) : Math.round(rawDur)) : 30000;
+          const remoteUrl = uploadResult.url.startsWith('http') ? uploadResult.url : `${serverUrl}${uploadResult.url}`;
+          // Pre-cache local copy so the owner's status never has to stream over network!
+          await saveLocalMediaCopy(remoteUrl, uri);
+          await uploadStatus({
+            statusType: 'video',
+            mediaUrl: uploadResult.url,
+            videoDuration: Math.min(30000, dur),
+            textContent: ''
+          });
+        }
+      } catch (err: any) {
+        console.error(err);
+        showNeonAlert({
+          title: 'TRANSMISSION ERROR',
+          message: err.message || 'Failed to upload video status.',
+          icon: 'warning-outline',
+          iconColor: '#f43f5e',
+          borderColor: '#f43f5e',
         });
-        setVideoToTrim(null);
+      } finally {
+        setUploading(false);
       }
-    } catch (err: any) {
-      console.error(err);
-      showNeonAlert({
-        title: 'TRANSMISSION ERROR',
-        message: err.message || 'Failed to upload video status.',
-        icon: 'warning-outline',
-        iconColor: '#f43f5e',
-        borderColor: '#f43f5e',
-      });
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -883,24 +855,15 @@ export default function StatusScreen() {
                   </View>
                 );
               })() : currentStory.statusType === 'video' && currentStory.mediaUrl ? (() => {
-                const mediaSourceUri = currentStory.mediaUrl.startsWith('http') 
-                  ? currentStory.mediaUrl 
-                  : `${serverUrl}${currentStory.mediaUrl}`;
-                // Prefer the locally-cached copy for this exact story when ready.
-                const videoSourceUri = (videoCache && videoCache.id === currentStory._id)
-                  ? videoCache.uri
-                  : mediaSourceUri;
                 return (
                   <View style={styles.imageViewerWrapper}>
                     <StatusVideoPlayer
                       key={currentStory._id || `vid_${currentStoryIndex}`}
-                      uri={videoSourceUri}
+                      uri={resolvedVideoUri}
                       shouldPlay={selectedGroup !== null}
-                      startTime={currentStory.startTime || 0}
-                      targetDuration={currentStory.videoDuration || 30000}
+                      onDuration={onVideoDuration}
                       onBufferingChange={onBufferingChange}
-                      onProgress={onVideoProgress}
-                      onFinished={onVideoFinished}
+                      onFinished={handleNextStory}
                     />
                     {currentStory.textContent && (
                       <View style={styles.imageTextCaptionBg}>
@@ -973,123 +936,6 @@ export default function StatusScreen() {
           </View>
         </Modal>
       )}
-
-      {/* Video Trim & Preview Modal */}
-      <Modal visible={videoToTrim !== null} animationType="slide" transparent={false} onRequestClose={() => !uploading && setVideoToTrim(null)}>
-        <SafeAreaView style={styles.trimmerContainer}>
-          <StatusBar barStyle="light-content" backgroundColor="#090d16" />
-          
-          {/* Header */}
-          <View style={styles.trimmerHeader}>
-            <TouchableOpacity onPress={() => !uploading && setVideoToTrim(null)} style={styles.trimmerCloseBtn}>
-              <Ionicons name="close" size={26} color="#cbd5e1" />
-            </TouchableOpacity>
-            <Text style={styles.trimmerTitle}>STORY VIDEO PREVIEW</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {/* Video Preview */}
-          {videoToTrim && (
-            <View style={styles.trimmerVideoContainer}>
-              <Video
-                source={{ uri: videoToTrim.uri }}
-                style={styles.trimmerPreviewVideo}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={true}
-                isLooping={true}
-                positionMillis={trimStartTimeMs}
-                onLoad={(data: any) => {
-                  if (data?.durationMillis && data.durationMillis > 0) {
-                    setVideoToTrim((prev) => prev ? { ...prev, durationMs: data.durationMillis } : null);
-                  }
-                }}
-              />
-            </View>
-          )}
-
-          {/* Trimming & Duration Controls */}
-          {videoToTrim && (
-            <View style={styles.trimmerControlsCard}>
-              {videoToTrim.durationMs > 30000 ? (
-                <>
-                  <View style={styles.trimmerInfoRow}>
-                    <Text style={styles.trimmerSegmentLabel}>Selected 30s Window:</Text>
-                    <Text style={styles.trimmerSegmentValue}>
-                      {formatMs(trimStartTimeMs)} ──▶ {formatMs(Math.min(videoToTrim.durationMs, trimStartTimeMs + 30000))}
-                    </Text>
-                  </View>
-                  <Text style={styles.trimmerTotalDuration}>
-                    Total Video: {formatMs(videoToTrim.durationMs)} (choose which 30s to post)
-                  </Text>
-
-                  {/* Step Buttons */}
-                  <View style={styles.trimmerStepButtonsRow}>
-                    <TouchableOpacity
-                      style={styles.trimmerStepBtn}
-                      onPress={() => setTrimStartTimeMs((prev) => Math.max(0, prev - 5000))}
-                    >
-                      <Text style={styles.trimmerStepBtnText}>-5s</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.trimmerStepBtn}
-                      onPress={() => setTrimStartTimeMs((prev) => Math.max(0, prev - 1000))}
-                    >
-                      <Text style={styles.trimmerStepBtnText}>-1s</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.trimmerStepBtn, styles.trimmerStepBtnReset]}
-                      onPress={() => setTrimStartTimeMs(0)}
-                    >
-                      <Text style={[styles.trimmerStepBtnText, { color: '#0df' }]}>Start</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.trimmerStepBtn}
-                      onPress={() => {
-                        const maxStart = Math.max(0, videoToTrim.durationMs - 30000);
-                        setTrimStartTimeMs((prev) => Math.min(maxStart, prev + 1000));
-                      }}
-                    >
-                      <Text style={styles.trimmerStepBtnText}>+1s</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.trimmerStepBtn}
-                      onPress={() => {
-                        const maxStart = Math.max(0, videoToTrim.durationMs - 30000);
-                        setTrimStartTimeMs((prev) => Math.min(maxStart, prev + 5000));
-                      }}
-                    >
-                      <Text style={styles.trimmerStepBtnText}>+5s</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : (
-                <View style={styles.trimmerFullVideoBox}>
-                  <Ionicons name="checkmark-circle" size={24} color="#10b981" style={{ marginRight: 8 }} />
-                  <Text style={styles.trimmerFullVideoText}>
-                    Video Duration: {formatMs(videoToTrim.durationMs)} (Plays completely, no trim needed)
-                  </Text>
-                </View>
-              )}
-
-              {/* Action Buttons */}
-              <TouchableOpacity
-                style={[styles.trimmerConfirmBtn, uploading && { opacity: 0.7 }]}
-                onPress={handleConfirmVideoUpload}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <ActivityIndicator size="small" color="#090d16" />
-                ) : (
-                  <>
-                    <Ionicons name="send" size={18} color="#090d16" style={{ marginRight: 8 }} />
-                    <Text style={styles.trimmerConfirmBtnText}>Share to Status</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-        </SafeAreaView>
-      </Modal>
 
     </View>
   );
@@ -1535,117 +1381,5 @@ const styles = StyleSheet.create({
   seenTime: {
     color: '#64748b',
     fontSize: 11,
-  },
-  trimmerContainer: {
-    flex: 1,
-    backgroundColor: '#090d16',
-  },
-  trimmerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  trimmerTitle: {
-    color: '#0df',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  trimmerCloseBtn: {
-    padding: 4,
-  },
-  trimmerVideoContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  trimmerPreviewVideo: {
-    width: '100%',
-    height: '100%',
-  },
-  trimmerControlsCard: {
-    backgroundColor: '#0d1322',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 18,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,221,255,0.2)',
-  },
-  trimmerInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  trimmerSegmentLabel: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  trimmerSegmentValue: {
-    color: '#0df',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  trimmerTotalDuration: {
-    color: '#64748b',
-    fontSize: 12,
-    marginBottom: 14,
-  },
-  trimmerStepButtonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  trimmerStepBtn: {
-    backgroundColor: '#1e293b',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  trimmerStepBtnReset: {
-    borderColor: '#0df',
-  },
-  trimmerStepBtnText: {
-    color: '#f1f5f9',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  trimmerFullVideoBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.1)',
-    borderWidth: 1,
-    borderColor: '#10b981',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-  },
-  trimmerFullVideoText: {
-    color: '#10b981',
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
-  },
-  trimmerConfirmBtn: {
-    flexDirection: 'row',
-    backgroundColor: '#0df',
-    paddingVertical: 14,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  trimmerConfirmBtnText: {
-    color: '#090d16',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.5,
   },
 });
