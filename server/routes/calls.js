@@ -107,7 +107,7 @@ router.post('/initiate', auth, async (req, res) => {
           // cancel message REPLACE (clear) this ringing notification.
           const TONE_IDS = ['pulse','chime','ripple','glow','aurora','marimba','classic','bright','bubble','cool','melody','romantic'];
           const tone = (recipient.callRingtone && TONE_IDS.indexOf(recipient.callRingtone) >= 0) ? recipient.callRingtone : null;
-          const ringChannelId = tone ? ('nova_call_' + tone) : 'nova_incoming_call_v3';
+          const ringChannelId = tone ? ('nova_call_' + tone + '_v4') : 'nova_incoming_call_v4';
           const ringSound = tone || 'ring_call';
           const invalidTokens = await sendData(recipient.fcmTokens, {
             type: 'incoming_call',

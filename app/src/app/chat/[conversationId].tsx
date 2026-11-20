@@ -11,6 +11,7 @@ import { Audio, Video, ResizeMode, InterruptionModeAndroid, InterruptionModeIOS 
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import { getToken } from '../../utils/tokenStore';
 
 const { width } = Dimensions.get('window');
 
@@ -122,7 +123,7 @@ const AudioMemoBubble = React.memo(({ uri }: { uri: string }) => {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
-        shouldRouteThroughEarpieceAndroid: false,
+        playThroughEarpieceAndroid: false,
       });
 
       let snd = sound;
@@ -204,6 +205,104 @@ const AudioMemoBubble = React.memo(({ uri }: { uri: string }) => {
           <Ionicons name="mic" size={13} color="#0df" />
         </View>
       </View>
+    </View>
+  );
+});
+
+// Persistent in-memory poll vote cache keyed by messageId
+const pollVoteCache: Record<string, { selectedOpt: string; votes: any[] }> = {};
+
+// MODULE-LEVEL INTERACTIVE POLL BUBBLE:
+// Memoized so frequent parent chat re-renders do NOT reset votes or break tap events.
+const PollBubble = React.memo(({ 
+  messageId, 
+  pollData, 
+  currentUserId,
+  serverUrl,
+  token
+}: { 
+  messageId: string; 
+  pollData: any; 
+  currentUserId?: string;
+  serverUrl?: string;
+  token?: string | null;
+}) => {
+  const voters = pollData.voters || {};
+  const myVote = (currentUserId && voters[currentUserId]) || pollVoteCache[messageId]?.selectedOpt || null;
+  const [selectedOpt, setSelectedOpt] = useState<string | null>(myVote);
+  const [votes, setVotes] = useState<any[]>(pollData?.options || []);
+
+  useEffect(() => {
+    const v = pollData?.voters || {};
+    const sv = (currentUserId && v[currentUserId]) || pollVoteCache[messageId]?.selectedOpt || null;
+    setSelectedOpt(sv);
+    setVotes(pollData?.options || []);
+  }, [pollData, currentUserId, messageId]);
+
+  const handleVote = async (optId: string) => {
+    if (selectedOpt) return; // Allow exactly one vote per user
+    const newVotes = votes.map((opt: any) =>
+      opt.id === optId ? { ...opt, votes: (opt.votes || 0) + 1 } : opt
+    );
+    setSelectedOpt(optId);
+    setVotes(newVotes);
+    pollVoteCache[messageId] = {
+      selectedOpt: optId,
+      votes: newVotes,
+    };
+
+    const authToken = token || await getToken();
+    if (serverUrl && authToken && messageId) {
+      try {
+        await fetch(`${serverUrl}/api/messages/${messageId}/poll-vote`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify({ optionId: optId })
+        });
+      } catch (e) {
+        console.warn('Poll vote sync error:', e);
+      }
+    }
+  };
+
+  const totalVotes = votes.reduce((sum: number, o: any) => sum + (o.votes || 0), 0) || 1;
+
+  return (
+    <View style={styles.pollContainer}>
+      <View style={styles.pollHeader}>
+        <Ionicons name="bar-chart" size={18} color="#0df" style={{ marginRight: 6 }} />
+        <Text style={styles.pollQuestion}>{pollData.question}</Text>
+      </View>
+      
+      {votes.map((opt: any) => {
+        const percentage = Math.round(((opt.votes || 0) / totalVotes) * 100);
+        const isChosen = selectedOpt === opt.id;
+        
+        return (
+          <TouchableOpacity
+            key={opt.id}
+            activeOpacity={0.7}
+            style={[styles.pollOptRow, isChosen && styles.pollOptRowChosen]}
+            onPress={() => handleVote(opt.id)}
+          >
+            {/* Vote percentage bar backing */}
+            <View 
+              pointerEvents="none"
+              style={[styles.pollVoteBarFill, { width: `${percentage}%` }, isChosen && { backgroundColor: '#0df' }]} 
+            />
+            
+            <View pointerEvents="none" style={styles.pollOptDetails}>
+              <Text style={[styles.pollOptText, isChosen && { color: '#090d16', fontWeight: '700' }]}>
+                {opt.text}
+              </Text>
+              <Text style={[styles.pollOptVotes, isChosen && { color: '#090d16', fontWeight: '700' }]}>
+                {opt.votes || 0} ({percentage}%)
+              </Text>
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+      <Text style={styles.pollFooter}>matrix neural poll • tap to cast vote</Text>
     </View>
   );
 });
@@ -371,6 +470,7 @@ const RingingPulse = ({ isRinging, children }: { isRinging: boolean; children: R
 export default function ChatScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { 
+    token,
     conversations, 
     messages, 
     loadMessages, 
@@ -681,7 +781,9 @@ export default function ChatScreen() {
 
   // Long-press on one of YOUR text messages → Edit / Delete for everyone.
   const handleMessageLongPress = (item: Message) => {
-    const isMine = typeof item.sender === 'string' ? item.sender === user?.id : (item.sender as any)?._id === user?.id;
+    const isMine = typeof item.sender === 'string' 
+      ? (item.sender === user?.id || item.sender === (user as any)?._id) 
+      : ((item.sender as any)?._id === user?.id || (item.sender as any)?.id === user?.id);
     if (!isMine || item.deletedForEveryone) return;
     const isText = (item.messageType || 'text') === 'text' && !!item.text;
     const buttons: any[] = [{ text: 'Cancel', style: 'cancel' }];
@@ -866,7 +968,7 @@ export default function ChatScreen() {
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
-        shouldRouteThroughEarpieceAndroid: false,
+        playThroughEarpieceAndroid: false,
         interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
         interruptionModeIOS: InterruptionModeIOS.DoNotMix,
       });
@@ -1113,64 +1215,6 @@ export default function ChatScreen() {
     return colors[Math.abs(hash) % colors.length];
   };
 
-  // SUB-COMPONENT: INTERACTIVE POLL BUBBLE
-  const PollBubble = ({ pollData }: { pollData: any }) => {
-    const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
-    const [votes, setVotes] = useState<any>(pollData.options);
-
-    const handleVote = (optId: string) => {
-      if (selectedOpt) return; // Allow exactly one vote
-      setSelectedOpt(optId);
-      setVotes((prev: any) =>
-        prev.map((opt: any) =>
-          opt.id === optId ? { ...opt, votes: opt.votes + 1 } : opt
-        )
-      );
-    };
-
-    const totalVotes = votes.reduce((sum: number, o: any) => sum + o.votes, 0) || 1;
-
-    return (
-      <View style={styles.pollContainer}>
-        <View style={styles.pollHeader}>
-          <Ionicons name="bar-chart" size={18} color="#0df" style={{ marginRight: 6 }} />
-          <Text style={styles.pollQuestion}>{pollData.question}</Text>
-        </View>
-        
-        {votes.map((opt: any) => {
-          const percentage = Math.round((opt.votes / totalVotes) * 100);
-          const isChosen = selectedOpt === opt.id;
-          
-          return (
-            <TouchableOpacity
-              key={opt.id}
-              style={[styles.pollOptRow, isChosen && styles.pollOptRowChosen]}
-              onPress={() => handleVote(opt.id)}
-            >
-              {/* Vote percentage bar backing */}
-              <View style={[styles.pollVoteBarFill, { width: `${percentage}%` }, isChosen && { backgroundColor: '#0df' }]} />
-              
-              <View style={styles.pollOptDetails}>
-                <Text style={[styles.pollOptText, isChosen && { color: '#090d16', fontWeight: '700' }]}>
-                  {opt.text}
-                </Text>
-                <Text style={[styles.pollOptVotes, isChosen && { color: '#090d16', fontWeight: '700' }]}>
-                  {opt.votes} ({percentage}%)
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-        <Text style={styles.pollFooter}>matrix neural poll • tap to cast vote</Text>
-      </View>
-    );
-  };
-
-  // SUB-COMPONENT: CYBER AUDIOWAVE MEMO BUBBLE
-  // Defined at module level (see AudioMemoBubble below the imports) so it is NOT
-  // recreated on every chat re-render — that was unmounting/remounting the player
-  // and breaking voice-note playback.
-
   // SUB-COMPONENT: HOLOGRAPHIC EVENT TICKET
   const EventBubble = ({ eventData }: { eventData: any }) => {
     return (
@@ -1306,7 +1350,9 @@ export default function ChatScreen() {
   };
 
   const renderMessageItem = ({ item, index }: { item: Message; index: number }) => {
-    const isMe = typeof item.sender === 'string' ? item.sender === user?.id : (item.sender as any)._id === user?.id;
+    const isMe = typeof item.sender === 'string' 
+      ? (item.sender === user?.id || item.sender === (user as any)?._id) 
+      : ((item.sender as any)?._id === user?.id || (item.sender as any)?.id === user?.id);
     const isEmoji = item.text && isOnlyEmoji(item.text);
     const prev = index > 0 ? chatMessages[index - 1] : undefined;
     const showDaySeparator = isNewDay(item.createdAt, prev?.createdAt);
@@ -1364,8 +1410,41 @@ export default function ChatScreen() {
             </Text>
           </View>
           </TouchableOpacity>
+        ) : (isPoll || isEvent || isDocument) ? (
+          <View style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble, styles.bentoCardBubble]}>
+            {isPoll && pollData ? (
+              <PollBubble 
+                messageId={item._id || (item as any).id || String(index)} 
+                pollData={pollData} 
+                currentUserId={user?.id} 
+                serverUrl={serverUrl} 
+                token={token} 
+              />
+            ) : isEvent && eventData ? (
+              <EventBubble eventData={eventData} />
+            ) : (
+              <DocumentBubble item={item} />
+            )}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onLongPress={() => handleMessageLongPress(item)}
+              delayLongPress={300}
+              style={styles.bubbleFooter}
+            >
+              <Text style={styles.messageTime}>{formatTime(item.createdAt)}</Text>
+              {item.edited && <Text style={styles.editedLabel}>edited</Text>}
+              {isMe && (
+                <Ionicons
+                  name={item.status === 'read' ? 'checkmark-done' : 'checkmark'}
+                  size={14}
+                  color={item.status === 'read' ? '#0df' : '#94a3b8'}
+                  style={{ marginLeft: 4 }}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
         ) : (
-          <TouchableOpacity activeOpacity={0.9} onLongPress={() => handleMessageLongPress(item)} delayLongPress={300} style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble, (isPoll || isEvent || isDocument) ? styles.bentoCardBubble : null]}>
+          <TouchableOpacity activeOpacity={0.9} onLongPress={() => handleMessageLongPress(item)} delayLongPress={300} style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble]}>
             {isImage ? (
               <TouchableOpacity onPress={() => {
                 setFullViewImageUri(mediaSourceUri);
@@ -1391,12 +1470,6 @@ export default function ChatScreen() {
               </TouchableOpacity>
             ) : isAudio ? (
               <AudioMemoBubble uri={mediaSourceUri} />
-            ) : isPoll && pollData ? (
-              <PollBubble pollData={pollData} />
-            ) : isEvent && eventData ? (
-              <EventBubble eventData={eventData} />
-            ) : isDocument ? (
-              <DocumentBubble item={item} />
             ) : (
               <Text style={styles.messageText}>{item.text}</Text>
             )}
@@ -1651,12 +1724,14 @@ export default function ChatScreen() {
               <Text style={styles.panelItemText}>Document</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.attachmentPanelItem} onPress={() => { setShowAttachmentMenu(false); setShowPollModal(true); }}>
-              <View style={[styles.panelIconBg, { backgroundColor: '#10b981' }]}>
-                <Ionicons name="bar-chart" size={20} color="#fff" />
-              </View>
-              <Text style={styles.panelItemText}>Poll</Text>
-            </TouchableOpacity>
+            {conversation?.isGroup && (
+              <TouchableOpacity style={styles.attachmentPanelItem} onPress={() => { setShowAttachmentMenu(false); setShowPollModal(true); }}>
+                <View style={[styles.panelIconBg, { backgroundColor: '#10b981' }]}>
+                  <Ionicons name="bar-chart" size={20} color="#fff" />
+                </View>
+                <Text style={styles.panelItemText}>Poll</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity style={styles.attachmentPanelItem} onPress={() => { setShowAttachmentMenu(false); setShowEventModal(true); }}>
               <View style={[styles.panelIconBg, { backgroundColor: '#f59e0b' }]}>

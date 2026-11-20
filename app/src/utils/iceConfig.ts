@@ -12,31 +12,31 @@
 // works on the same Wi-Fi but is unreliable across mobile/remote networks.
 // ──────────────────────────────────────────────────────────────
 
-const METERED_SUBDOMAIN = ''; // e.g. 'nova'  (from https://nova.metered.live)
-const METERED_API_KEY = '';   // your Metered API key
+const METERED_SUBDOMAIN = 'axon-nova'; // e.g. 'nova'  (from https://nova.metered.live)
+const METERED_API_KEY = '703c93d449b8d9f777cd24bc6d06f7ce94c7';   // your Metered API key
 
 const DEFAULT_ICE: any[] = [
-  // Metered TURN (axonnova) — reliable relay so calls connect across any network worldwide
+  // Metered TURN (axon-nova) — reliable relay so calls connect across any network worldwide
   { urls: 'stun:stun.relay.metered.ca:80' },
   {
     urls: 'turn:global.relay.metered.ca:80',
-    username: 'd4b2f6fff24f348e4411958d',
-    credential: 'usqUKMRaQ5oXLwI0',
+    username: '7d4122df9f565925316c36f9',
+    credential: '6VsCrYQJJywDXN8u',
   },
   {
     urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-    username: 'd4b2f6fff24f348e4411958d',
-    credential: 'usqUKMRaQ5oXLwI0',
+    username: '7d4122df9f565925316c36f9',
+    credential: '6VsCrYQJJywDXN8u',
   },
   {
     urls: 'turn:global.relay.metered.ca:443',
-    username: 'd4b2f6fff24f348e4411958d',
-    credential: 'usqUKMRaQ5oXLwI0',
+    username: '7d4122df9f565925316c36f9',
+    credential: '6VsCrYQJJywDXN8u',
   },
   {
     urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-    username: 'd4b2f6fff24f348e4411958d',
-    credential: 'usqUKMRaQ5oXLwI0',
+    username: '7d4122df9f565925316c36f9',
+    credential: '6VsCrYQJJywDXN8u',
   },
   // Google STUN (for fast direct connections on the same network)
   { urls: 'stun:stun.l.google.com:19302' },

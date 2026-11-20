@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text, DeviceEventEmitter } from 'react-native';
 import { useApp } from '../../context/AppContext';
 
 export default function TabsLayout() {
@@ -61,7 +61,11 @@ export default function TabsLayout() {
           ),
           headerRight: () => (
             <View style={styles.headerRightContainer}>
-              <TouchableOpacity style={styles.headerButton}>
+              <TouchableOpacity
+                style={styles.headerButton}
+                activeOpacity={0.7}
+                onPress={() => DeviceEventEmitter.emit('OPEN_STATUS_CAMERA')}
+              >
                 <Ionicons name="camera-outline" size={22} color="#cbd5e1" />
               </TouchableOpacity>
             </View>

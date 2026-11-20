@@ -61,7 +61,7 @@ router.get('/:userId', auth, async (req, res) => {
 // @route   POST api/status
 // @desc    Create a new status/story
 router.post('/', auth, async (req, res) => {
-  const { statusType, mediaUrl, textContent, textColor, backgroundColor, privacy } = req.body;
+  const { statusType, mediaUrl, textContent, textColor, backgroundColor, privacy, startTime, videoDuration } = req.body;
 
   if (!statusType) {
     return res.status(400).json({ message: 'Status type is required' });
@@ -79,7 +79,9 @@ router.post('/', auth, async (req, res) => {
       textContent: textContent || null,
       textColor: textColor || '#FFFFFF',
       backgroundColor: backgroundColor || '#000000',
-      privacy: privacy || 'contacts'
+      privacy: privacy || 'contacts',
+      startTime: typeof startTime === 'number' ? Math.max(0, startTime) : 0,
+      videoDuration: typeof videoDuration === 'number' ? Math.min(30000, Math.max(1000, videoDuration)) : 30000
     });
 
     await status.save();
@@ -125,6 +127,10 @@ router.put('/:statusId/view', auth, async (req, res) => {
     const populatedStatus = await Status.findById(status._id)
       .populate('user', 'username displayName avatarUrl')
       .populate('viewers.user', 'username displayName avatarUrl');
+
+    if (req.io && status.user) {
+      req.io.to(`user_${status.user.toString()}`).emit('status_viewed', populatedStatus);
+    }
 
     res.json(populatedStatus);
   } catch (err) {

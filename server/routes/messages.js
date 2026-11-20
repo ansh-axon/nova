@@ -361,6 +361,58 @@ router.put('/:messageId/edit', auth, async (req, res) => {
   }
 });
 
+// @route   PUT api/messages/:messageId/poll-vote
+// @desc    Cast a vote on a poll message (any group participant can vote)
+router.put('/:messageId/poll-vote', auth, async (req, res) => {
+  const { optionId } = req.body;
+  if (!optionId) return res.status(400).json({ message: 'optionId is required' });
+  try {
+    const message = await Message.findById(req.params.messageId);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (!message.text || !message.text.startsWith('POLL:')) {
+      return res.status(400).json({ message: 'Not a poll message' });
+    }
+
+    const conversation = await Conversation.findById(message.conversation);
+    if (!conversation || !conversation.participants.some(p => p.toString() === req.user.id)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    let pollData;
+    try {
+      pollData = JSON.parse(message.text.substring(5));
+    } catch (e) {
+      return res.status(400).json({ message: 'Invalid poll data' });
+    }
+
+    if (!pollData.voters) pollData.voters = {};
+    if (pollData.voters[req.user.id]) {
+      return res.status(400).json({ message: 'You have already voted on this poll' });
+    }
+
+    pollData.voters[req.user.id] = optionId;
+
+    pollData.options = (pollData.options || []).map((opt) => {
+      const count = Object.values(pollData.voters).filter((v) => v === opt.id).length;
+      return { ...opt, votes: count };
+    });
+
+    const newText = 'POLL:' + JSON.stringify(pollData);
+    message.text = newText;
+    await message.save();
+
+    const populated = await Message.findById(message._id).populate('sender', 'username displayName avatarUrl');
+    conversation.participants.forEach((pid) => {
+      req.io.to(`user_${pid.toString()}`).emit('message_edited', populated);
+    });
+
+    res.json(populated);
+  } catch (err) {
+    console.error('[POLL-VOTE] error:', err.message);
+    res.status(500).json({ message: 'Server error casting vote' });
+  }
+});
+
 // @route   DELETE api/messages/:messageId
 // @desc    Delete your own message for everyone (notifies all participants)
 router.delete('/:messageId', auth, async (req, res) => {
@@ -404,7 +456,7 @@ router.put('/:messageId/read', auth, async (req, res) => {
 
     // Check if user is recipient
     const conversation = await Conversation.findById(message.conversation);
-    if (!conversation || !conversation.participants.includes(req.user.id)) {
+    if (!conversation || !conversation.participants.some(p => p.toString() === req.user.id)) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 

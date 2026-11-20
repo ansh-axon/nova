@@ -17,6 +17,14 @@ const StatusSchema = new mongoose.Schema({
   textContent: String,
   textColor: String,
   backgroundColor: String,
+  startTime: {
+    type: Number,
+    default: 0
+  },
+  videoDuration: {
+    type: Number,
+    default: 30000
+  },
   // Who can view this status
   viewers: [{
     user: {

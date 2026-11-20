@@ -169,6 +169,27 @@ function GlobalCallHost() {
     }
   }, [isMuted, localStream]);
 
+  // Route call audio: default to EARPIECE (calling speaker near camera) when connected;
+  // toggle to LOUDSPEAKER only when isSpeaker is explicitly turned on.
+  useEffect(() => {
+    if (callState === 'connected') {
+      (async () => {
+        try {
+          const { Audio } = require('expo-av');
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            playThroughEarpieceAndroid: !isSpeaker,
+            staysActiveInBackground: true,
+          });
+          console.log('[Audio] Route changed. Earpiece active:', !isSpeaker);
+        } catch (e) {
+          console.warn('[Audio] Failed to set audio mode:', e);
+        }
+      })();
+    }
+  }, [isSpeaker, callState]);
+
   // Bind local camera toggle to WebRTC track configurations
   useEffect(() => {
     if (localStream) {

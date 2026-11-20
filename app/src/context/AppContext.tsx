@@ -132,6 +132,8 @@ interface AppContextType {
     textContent?: string;
     textColor?: string;
     backgroundColor?: string;
+    startTime?: number;
+    videoDuration?: number;
   }) => Promise<boolean>;
   uploadFile: (fileUri: string, fileMimeType: string) => Promise<{ url: string } | null>;
   markStatusViewed: (statusId: string) => Promise<void>;
@@ -559,7 +561,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
-          shouldRouteThroughEarpieceAndroid: true, // Route through earpiece (phone speaker)
+          playThroughEarpieceAndroid: true, // Route through earpiece (phone ear speaker near camera)
           staysActiveInBackground: true,
           interruptionMode: 0 // Ignore interruptions (highest priority for calls)
         });
@@ -667,7 +669,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
-          shouldRouteThroughEarpieceAndroid: true, // Route through earpiece (phone speaker)
+          playThroughEarpieceAndroid: true, // Route through earpiece (phone ear speaker near camera)
           staysActiveInBackground: true,
           interruptionMode: 0 // Highest priority for calls
         });
@@ -729,7 +731,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           playsInSilentModeIOS: false,
-          shouldRouteThroughEarpieceAndroid: false,
+          playThroughEarpieceAndroid: false,
           staysActiveInBackground: false,
           interruptionMode: 1 // Default interruption mode
         });
@@ -784,7 +786,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
-        shouldRouteThroughEarpieceAndroid: false,
+        playThroughEarpieceAndroid: false,
         staysActiveInBackground: true,
         interruptionMode: 0
       });
@@ -1452,6 +1454,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ),
         };
       });
+    });
+
+    // Live status viewer update: someone viewed my story -> update viewers count in real time!
+    socketInstance.on('status_viewed', (updatedStatus: any) => {
+      setStatuses((prev) =>
+        prev.map((s) => (s._id === updatedStatus._id ? { ...s, viewers: updatedStatus.viewers } : s))
+      );
     });
 
     socketInstance.on('user_status_changed', (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
@@ -2526,6 +2535,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     textContent?: string;
     textColor?: string;
     backgroundColor?: string;
+    startTime?: number;
+    videoDuration?: number;
   }): Promise<boolean> => {
     if (!token) return false;
     try {

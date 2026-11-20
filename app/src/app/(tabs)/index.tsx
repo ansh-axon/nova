@@ -17,6 +17,41 @@ const { width } = Dimensions.get('window');
 // asset URL (or Google Drive link) once the 140 MB APK is uploaded there.
 const INVITE_DOWNLOAD_URL = 'https://github.com/ansh-axon/nova/releases';
 
+export const formatLastMessageText = (msg: any): string => {
+  if (!msg) return 'No messages yet';
+  if (msg.deletedForEveryone) return '🚫 This message was deleted';
+  const text = msg.text || '';
+  if (typeof text === 'string' && text.startsWith('POLL:')) {
+    try {
+      const poll = JSON.parse(text.substring(5));
+      return `📊 Poll: ${poll.question || 'Poll'}`;
+    } catch {
+      return '📊 Poll';
+    }
+  }
+  if (typeof text === 'string' && text.startsWith('EVENT:')) {
+    try {
+      const ev = JSON.parse(text.substring(6));
+      return `🎟️ Event: ${ev.title || 'Event'}`;
+    } catch {
+      return '🎟️ Event';
+    }
+  }
+  if (msg.messageType === 'image' || (typeof text === 'string' && text.startsWith('data:image/'))) {
+    return '📷 Photo';
+  }
+  if (msg.messageType === 'video' || (typeof text === 'string' && text.startsWith('data:video/'))) {
+    return '📹 Video';
+  }
+  if (msg.messageType === 'audio' || (typeof text === 'string' && text.startsWith('data:audio/'))) {
+    return '🎤 Voice message';
+  }
+  if (msg.messageType === 'file' || (typeof text === 'string' && (text.startsWith('data:application/') || text.includes('📁 Secure Document')))) {
+    return '📄 Document';
+  }
+  return text;
+};
+
 interface VaultItem {
   name: string;
   details: string;
@@ -521,7 +556,9 @@ export default function BentoDashboardScreen() {
                       <View style={{ flex: 1 }}>
                         {item.lastMessage ? (
                           <View style={styles.messageRow}>
-                            {item.lastMessage.sender === user?.id && (
+                            {(typeof item.lastMessage.sender === 'string' 
+                              ? (item.lastMessage.sender === user?.id || item.lastMessage.sender === (user as any)?._id) 
+                              : ((item.lastMessage.sender as any)?._id === user?.id || (item.lastMessage.sender as any)?.id === user?.id)) && (
                               <Ionicons
                                 name={item.lastMessage.status === 'read' ? 'checkmark-done' : 'checkmark'}
                                 size={16}
@@ -530,7 +567,7 @@ export default function BentoDashboardScreen() {
                               />
                             )}
                             <Text style={styles.lastMessageText} numberOfLines={1}>
-                              {item.lastMessage.text}
+                              {formatLastMessageText(item.lastMessage)}
                             </Text>
                           </View>
                         ) : (
@@ -680,7 +717,7 @@ export default function BentoDashboardScreen() {
                       <View style={styles.chatInfo}>
                         <Text style={styles.participantName}>{other.displayName}</Text>
                         <Text style={styles.lastMessageText} numberOfLines={1}>
-                          {item.lastMessage?.text || 'Tap to open'}
+                          {item.lastMessage ? formatLastMessageText(item.lastMessage) : 'Tap to open'}
                         </Text>
                       </View>
                       <TouchableOpacity onPress={() => unlockChat(item._id)} style={{ padding: 8 }}>

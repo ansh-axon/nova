@@ -18,22 +18,41 @@ function init() {
   if (initTried) return;
   initTried = true;
   try {
+    let serviceAccount = null;
     const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!raw) {
-      console.warn('[FCM-ADMIN] FIREBASE_SERVICE_ACCOUNT not set — call data messages disabled.');
+    if (raw) {
+      serviceAccount = JSON.parse(raw);
+    } else {
+      const fs = require('fs');
+      const path = require('path');
+      const candidates = [
+        path.join(__dirname, '..', 'firebase-service-account.json'),
+        path.join(__dirname, '..', 'nova-244e5-firebase-adminsdk-fbsvc-5e369d554a.json'),
+        path.join(__dirname, '..', '..', 'app', 'nova-244e5-firebase-adminsdk-fbsvc-5e369d554a.json'),
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          serviceAccount = JSON.parse(fs.readFileSync(p, 'utf8'));
+          console.log('[FCM-ADMIN] Loaded service account from file:', path.basename(p));
+          break;
+        }
+      }
+    }
+
+    if (!serviceAccount) {
+      console.warn('[FCM-ADMIN] FIREBASE_SERVICE_ACCOUNT not set and no key file found — call data messages disabled.');
       return;
     }
     const { initializeApp, getApps, cert } = require('firebase-admin/app');
     const { getMessaging } = require('firebase-admin/messaging');
 
-    const serviceAccount = JSON.parse(raw);
     const app = getApps().length
       ? getApps()[0]
       : initializeApp({ credential: cert(serviceAccount) });
 
     messagingInstance = getMessaging(app);
     initialized = true;
-    console.log('[FCM-ADMIN] Initialized.');
+    console.log('[FCM-ADMIN] Initialized successfully with project:', serviceAccount.project_id);
   } catch (err) {
     console.error('[FCM-ADMIN] init failed:', err.message);
     messagingInstance = null;

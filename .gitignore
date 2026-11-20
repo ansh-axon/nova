@@ -12,6 +12,9 @@ node_modules/
 **/GoogleService-Info.plist
 **/*firebase-adminsdk*.json
 app/nova-fcm-service-account.json
+server/firebase-service-account.json
+serve-test.js
+webrtc-test.html
 
 # Logs
 *.log

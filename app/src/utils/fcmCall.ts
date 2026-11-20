@@ -40,7 +40,7 @@ async function putToServer(path: string): Promise<void> {
 
 // NOTE: bump this id whenever the channel's sound/importance changes — Android
 // channels are immutable once created, so a new id forces the new settings.
-const CALL_CHANNEL = 'nova_incoming_call_v3';
+const CALL_CHANNEL = 'nova_incoming_call_v4';
 const CALL_NOTIF_ID = 'nova_incoming_call_notif';
 
 // Stores the pending call so the app, once opened, can act on Accept.
@@ -54,7 +54,7 @@ export async function ensureCallChannel(): Promise<void> {
     importance: AndroidImportance.HIGH,
     sound: 'ring_call',
     vibration: true,
-    vibrationPattern: [400, 1000, 400, 1000],
+    vibrationPattern: [1000, 1000, 1000, 1000, 1000, 1000],
     bypassDnd: true,
   });
   // Silent channel used to REPLACE (clear) the ringing call notification when a
@@ -86,7 +86,7 @@ export const CALL_TONE_IDS = [
 // Returns the notification channel id whose sound matches the chosen ringtone
 // (falls back to the default ring_call channel).
 export function callChannelIdForTone(toneId?: string | null): string {
-  if (toneId && CALL_TONE_IDS.indexOf(toneId) >= 0) return 'nova_call_' + toneId;
+  if (toneId && CALL_TONE_IDS.indexOf(toneId) >= 0) return 'nova_call_' + toneId + '_v4';
   return CALL_CHANNEL;
 }
 
@@ -94,14 +94,14 @@ export function callChannelIdForTone(toneId?: string | null): string {
 // lock screen. No-op for unknown ids.
 export async function ensureToneCallChannel(toneId: string): Promise<string> {
   if (Platform.OS !== 'android' || CALL_TONE_IDS.indexOf(toneId) < 0) return CALL_CHANNEL;
-  const id = 'nova_call_' + toneId;
+  const id = 'nova_call_' + toneId + '_v4';
   await notifee.createChannel({
     id,
     name: 'Incoming Calls (' + toneId + ')',
     importance: AndroidImportance.HIGH,
     sound: toneId,
     vibration: true,
-    vibrationPattern: [400, 1000, 400, 1000],
+    vibrationPattern: [1000, 1000, 1000, 1000, 1000, 1000],
     bypassDnd: true,
   });
   return id;
@@ -223,6 +223,7 @@ export async function displayIncomingCall(data: any): Promise<void> {
         ongoing: true,
         autoCancel: false,
         loopSound: true,
+        vibrationPattern: [1000, 1000, 1000, 1000, 1000, 1000],
         fullScreenAction: { id: 'default', launchActivity: 'default' },
         pressAction: { id: 'default', launchActivity: 'default' },
         actions: [
