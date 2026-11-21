@@ -209,6 +209,9 @@ const AudioMemoBubble = React.memo(({ uri }: { uri: string }) => {
   );
 });
 
+// In-memory cache for locally verified video paths in chat
+const chatVideoCacheMap: Record<string, string> = {};
+
 // MODULE-LEVEL video message bubble.
 // Checks if the video is already downloaded in local cache. If not, prompts user
 // to download with a tap and displays download progress. Once downloaded, plays
@@ -221,9 +224,8 @@ const ChatVideoBubble = React.memo(({
   onOpenFullView: (localPath: string) => void;
 }) => {
   const isLocalUri = uri.startsWith('file://');
-  const [localUri, setLocalUri] = useState<string | null>(isLocalUri ? uri : null);
+  const [localUri, setLocalUri] = useState<string | null>(isLocalUri ? uri : (chatVideoCacheMap[uri] || null));
   const [downloading, setDownloading] = useState(false);
-  const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
 
   const cacheDir = FileSystem.cacheDirectory + 'nova_videos/';
@@ -236,10 +238,16 @@ const ChatVideoBubble = React.memo(({
       try {
         if (isLocalUri) {
           setLocalUri(uri);
+          chatVideoCacheMap[uri] = uri;
+          return;
+        }
+        if (chatVideoCacheMap[uri]) {
+          setLocalUri(chatVideoCacheMap[uri]);
           return;
         }
         const info = await FileSystem.getInfoAsync(cachePath);
-        if (info.exists && mounted) {
+        if (info.exists && (info as any).size > 0 && mounted) {
+          chatVideoCacheMap[uri] = cachePath;
           setLocalUri(cachePath);
         }
       } catch (e) {
@@ -257,42 +265,40 @@ const ChatVideoBubble = React.memo(({
     if (downloading) return;
     setDownloading(true);
     setFailed(false);
-    setProgressPercent(0);
     try {
       const dirInfo = await FileSystem.getInfoAsync(cacheDir);
       if (!dirInfo.exists) {
         await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
       }
 
-      const downloadResumable = FileSystem.createDownloadResumable(
-        uri,
-        cachePath,
-        {},
-        (downloadProgress) => {
-          const total = downloadProgress.totalBytesExpectedToWrite;
-          if (total > 0) {
-            const p = Math.round((downloadProgress.totalBytesWritten / total) * 100);
-            setProgressPercent(p);
-          }
-        }
-      );
-
-      const res = await downloadResumable.downloadAsync();
-      if (res && res.status >= 200 && res.status < 300) {
+      // 1. Check if already exists on disk
+      const existingInfo = await FileSystem.getInfoAsync(cachePath);
+      if (existingInfo.exists && (existingInfo as any).size > 0) {
+        chatVideoCacheMap[uri] = cachePath;
         setLocalUri(cachePath);
         setDownloading(false);
-        setProgressPercent(null);
         onOpenFullView(cachePath);
-      } else {
-        setFailed(true);
-        setDownloading(false);
-        setProgressPercent(null);
+        return;
       }
+
+      // 2. Download directly to device storage
+      const res = await FileSystem.downloadAsync(uri, cachePath);
+      if (res && (!res.status || (res.status >= 200 && res.status < 400))) {
+        const verifyInfo = await FileSystem.getInfoAsync(cachePath);
+        if (verifyInfo.exists && (verifyInfo as any).size > 0) {
+          chatVideoCacheMap[uri] = cachePath;
+          setLocalUri(cachePath);
+          setDownloading(false);
+          onOpenFullView(cachePath);
+          return;
+        }
+      }
+      setFailed(true);
+      setDownloading(false);
     } catch (e) {
       console.warn('Video download error:', e);
       setFailed(true);
       setDownloading(false);
-      setProgressPercent(null);
     }
   };
 
@@ -305,22 +311,57 @@ const ChatVideoBubble = React.memo(({
     >
       <View style={styles.videoPlayerPlaceholder}>
         {downloading ? (
-          <View style={{ alignItems: 'center' }}>
+          <View style={{ alignItems: 'center', paddingHorizontal: 12 }}>
             <ActivityIndicator size="large" color="#0df" />
-            <Text style={styles.videoPlaceholderText}>
-              {progressPercent !== null ? `Downloading ${progressPercent}%...` : 'Downloading video...'}
+            <Text style={[styles.videoPlaceholderText, { color: '#0df', marginTop: 8, fontWeight: '700' }]}>
+              Downloading Video...
+            </Text>
+            <Text style={[styles.videoPlaceholderText, { fontSize: 10, color: '#64748b', marginTop: 2 }]}>
+              Saving to device storage
             </Text>
           </View>
         ) : localUri ? (
           <View style={{ alignItems: 'center' }}>
-            <Ionicons name="play-circle" size={46} color="#0df" />
-            <Text style={[styles.videoPlaceholderText, { color: '#0df' }]}>▶ Play Video</Text>
+            <View style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: 'rgba(0, 221, 255, 0.15)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderWidth: 1.5,
+              borderColor: '#0df',
+              marginBottom: 6,
+            }}>
+              <Ionicons name="play" size={26} color="#0df" style={{ marginLeft: 3 }} />
+            </View>
+            <Text style={[styles.videoPlaceholderText, { color: '#0df', fontWeight: '800', fontSize: 13 }]}>
+              ▶ Play Video
+            </Text>
+            <Text style={[styles.videoPlaceholderText, { fontSize: 10, color: '#10b981', marginTop: 2 }]}>
+              ✓ Downloaded (Smooth Play)
+            </Text>
           </View>
         ) : (
-          <View style={{ alignItems: 'center' }}>
-            <Ionicons name="cloud-download-outline" size={42} color="#0df" />
-            <Text style={styles.videoPlaceholderText}>
-              {failed ? 'Download Failed • Tap Retry' : 'Tap to Download Video'}
+          <View style={{ alignItems: 'center', paddingHorizontal: 12 }}>
+            <View style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.2)',
+              marginBottom: 6,
+            }}>
+              <Ionicons name="cloud-download-outline" size={24} color="#0df" />
+            </View>
+            <Text style={[styles.videoPlaceholderText, { color: '#f1f5f9', fontWeight: '700', fontSize: 12 }]}>
+              {failed ? 'Download Failed' : 'Download Video'}
+            </Text>
+            <Text style={[styles.videoPlaceholderText, { fontSize: 10, color: failed ? '#f43f5e' : '#94a3b8', marginTop: 2 }]}>
+              {failed ? 'Tap to Retry Download' : 'Tap to download & watch'}
             </Text>
           </View>
         )}
@@ -1486,7 +1527,7 @@ export default function ChatScreen() {
     const prev = index > 0 ? chatMessages[index - 1] : undefined;
     const showDaySeparator = isNewDay(item.createdAt, prev?.createdAt);
     const isImage = (item.text && item.text.startsWith('data:image/')) || item.messageType === 'image';
-    const isVideo = (item.text && item.text.startsWith('data:video/')) || item.messageType === 'video';
+    const isVideo = (item.text && item.text.startsWith('data:video/')) || item.messageType === 'video' || (!!item.mediaUrl && /\.(mp4|mov|mkv|webm|3gp)$/i.test(item.mediaUrl));
     const isAudio = (item.text && item.text.startsWith('data:audio/')) || item.messageType === 'audio';
     const isPoll = item.text && item.text.startsWith('POLL:');
     const isEvent = item.text && item.text.startsWith('EVENT:');
@@ -2656,26 +2697,25 @@ const styles = StyleSheet.create({
 
   // CYBER ADVANCED CHAT SHARING EXTRA STYLES
   videoBubbleWrapper: {
-    width: 200,
-    height: 120,
-    borderRadius: 12,
+    width: 220,
+    height: 130,
+    borderRadius: 14,
     overflow: 'hidden',
     marginBottom: 4,
   },
   videoPlayerPlaceholder: {
     flex: 1,
-    backgroundColor: '#020617',
+    backgroundColor: '#070c18',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0, 221, 255, 0.2)',
+    borderColor: 'rgba(0, 221, 255, 0.25)',
+    borderRadius: 14,
   },
   videoPlaceholderText: {
     color: '#64748b',
     fontSize: 11,
-    fontWeight: '700',
-    marginTop: 8,
-    textTransform: 'uppercase',
+    textAlign: 'center',
   },
   
   audioBubbleContainer: {

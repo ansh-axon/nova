@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, Dimensions, StatusBar, TextInput, ActivityIndicator, DeviceEventEmitter } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, Image, Modal, Dimensions, StatusBar, TextInput, ActivityIndicator, DeviceEventEmitter, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { useIsFocused } from '@react-navigation/native';
@@ -20,23 +20,20 @@ const { width, height } = Dimensions.get('window');
 const StatusVideoPlayer = React.memo(({ 
   uri, 
   shouldPlay, 
-  onDuration, 
-  onBufferingChange,
+  onProgress,
   onFinished
 }: {
   uri: string;
   shouldPlay: boolean;
-  onDuration?: (ms: number) => void;
-  onBufferingChange?: (buffering: boolean) => void;
+  onProgress?: (progress: number) => void;
   onFinished?: () => void;
 }) => {
   const [buffering, setBuffering] = useState(true);
-  const reportedRef = useRef(false);
+  const finishedRef = useRef(false);
 
   useEffect(() => {
-    reportedRef.current = false;
+    finishedRef.current = false;
     setBuffering(true);
-    onBufferingChange?.(true);
   }, [uri]);
 
   return (
@@ -49,21 +46,27 @@ const StatusVideoPlayer = React.memo(({
         resizeMode={ResizeMode.CONTAIN}
         shouldPlay={shouldPlay}
         isLooping={false}
+        progressUpdateIntervalMillis={50}
         style={styles.viewerVideo}
         onLoadStart={() => {
           setBuffering(true);
-          onBufferingChange?.(true);
         }}
         onPlaybackStatusUpdate={(status: any) => {
           if (status.isLoaded) {
             const isBuff = !!status.isBuffering && !status.isPlaying;
             setBuffering(isBuff);
-            onBufferingChange?.(isBuff);
-            if (status.durationMillis && !reportedRef.current) {
-              reportedRef.current = true;
-              onDuration?.(status.durationMillis);
+            if (status.durationMillis && status.durationMillis > 0) {
+              const maxDur = Math.min(30000, status.durationMillis);
+              const curPos = Math.min(maxDur, Math.max(0, status.positionMillis || 0));
+              const p = curPos / maxDur;
+              onProgress?.(p);
+              if (curPos >= maxDur && !finishedRef.current) {
+                finishedRef.current = true;
+                onFinished?.();
+              }
             }
-            if (status.didJustFinish) {
+            if (status.didJustFinish && !finishedRef.current) {
+              finishedRef.current = true;
               onFinished?.();
             }
           }
@@ -85,11 +88,9 @@ export default function StatusScreen() {
 
   const [selectedGroup, setSelectedGroup] = useState<any | null>(null);
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const progressAnim = useRef(new Animated.Value(0)).current;
   const [groupedStatuses, setGroupedStatuses] = useState<any[]>([]);
   const [showViewers, setShowViewers] = useState(false);
-  const videoBufferingRef = useRef<boolean>(false);
-  const videoDurationRef = useRef<number>(0);
 
   // Active story source resolution (memoized per story so it never changes mid-playback)
   const currentStoryItem = selectedGroup?.stories?.[currentStoryIndex];
@@ -245,44 +246,35 @@ export default function StatusScreen() {
   }, [statuses, user]);
 
   // Story auto-progress:
-  // Smooth, rock-solid time-based progress bar for BOTH images/text (5s) and videos (up to 30s).
-  // Driven by a dedicated JavaScript interval that NEVER freezes or gets stuck.
+  // For images and text: smooth 5-second linear animation via Animated.timing.
+  // For videos: StatusVideoPlayer directly updates progressAnim in 100% frame synchronization!
   useEffect(() => {
     if (!selectedGroup) return;
     const cur = selectedGroup.stories?.[currentStoryIndex];
     if (!cur) return;
-    const isVideoStory = cur.statusType === 'video';
 
-    setProgress(0);
-    videoBufferingRef.current = isVideoStory;
-    videoDurationRef.current = (typeof cur.videoDuration === 'number' && cur.videoDuration > 0)
-      ? Math.min(30000, cur.videoDuration)
-      : 0;
+    progressAnim.stopAnimation();
+    progressAnim.setValue(0);
 
-    let elapsed = 0;
-    let initialBufferingWait = 0;
-    const interval = setInterval(() => {
-      // While video is initial buffering at start (elapsed === 0), wait at most 1.2s before ticking
-      if (isVideoStory && videoBufferingRef.current && elapsed === 0) {
-        initialBufferingWait += 50;
-        if (initialBufferingWait < 1200) {
-          return;
-        }
-      }
+    // Video stories drive their own progress bar in real time via onPlaybackStatusUpdate!
+    if (cur.statusType === 'video') return;
 
-      elapsed += 50;
-      const dur = videoDurationRef.current > 0 ? Math.min(30000, videoDurationRef.current) : 30000;
-      const targetDuration = isVideoStory ? dur : 5000;
-      const p = Math.min(1, elapsed / targetDuration);
-      setProgress(p);
+    const anim = Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: 5000,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
 
-      if (p >= 1) {
-        clearInterval(interval);
+    anim.start(({ finished }) => {
+      if (finished) {
         handleNextStory();
       }
-    }, 50);
+    });
 
-    return () => clearInterval(interval);
+    return () => {
+      anim.stop();
+    };
   }, [selectedGroup?.userId, currentStoryIndex]);
 
   // Keep selectedGroup in sync with live status updates (such as real-time viewers)
@@ -316,9 +308,10 @@ export default function StatusScreen() {
   const handleNextStory = () => {
     if (!selectedGroup) return;
     setShowViewers(false);
+    progressAnim.stopAnimation();
+    progressAnim.setValue(0);
     if (currentStoryIndex < selectedGroup.stories.length - 1) {
       setCurrentStoryIndex((prev) => prev + 1);
-      setProgress(0);
     } else {
       setSelectedGroup(null); // Auto close
     }
@@ -327,26 +320,22 @@ export default function StatusScreen() {
   const handlePrevStory = () => {
     if (!selectedGroup) return;
     setShowViewers(false);
+    progressAnim.stopAnimation();
+    progressAnim.setValue(0);
     if (currentStoryIndex > 0) {
       setCurrentStoryIndex((prev) => prev - 1);
-      setProgress(0);
     } else {
       setSelectedGroup(null); // Auto close if tapped left on first
     }
   };
 
   // Stable callbacks for the memoized StatusVideoPlayer so it never re-renders
-  // (and never re-buffers) just because the parent re-rendered for progress.
+  // (and never re-buffers) during video playback.
   const handleNextStoryRef = useRef(handleNextStory);
   handleNextStoryRef.current = handleNextStory;
-  const onVideoDuration = useCallback((ms: number) => {
-    if (ms > 0) {
-      videoDurationRef.current = ms;
-    }
-  }, []);
-  const onBufferingChange = useCallback((buffering: boolean) => {
-    videoBufferingRef.current = buffering;
-  }, []);
+  const onVideoProgress = useCallback((p: number) => {
+    progressAnim.setValue(p);
+  }, [progressAnim]);
   const onVideoFinished = useCallback(() => {
     handleNextStoryRef.current();
   }, []);
@@ -374,7 +363,8 @@ export default function StatusScreen() {
               } else {
                 setSelectedGroup({ ...selectedGroup, stories: remaining });
                 setCurrentStoryIndex(Math.min(currentStoryIndex, remaining.length - 1));
-                setProgress(0);
+                progressAnim.stopAnimation();
+                progressAnim.setValue(0);
               }
             }
           }
@@ -626,7 +616,8 @@ export default function StatusScreen() {
         stories: sortedOwnStories
       });
       setCurrentStoryIndex(0);
-      setProgress(0);
+      progressAnim.stopAnimation();
+      progressAnim.setValue(0);
     } else {
       handleCreateStatus();
     }
@@ -640,7 +631,8 @@ export default function StatusScreen() {
         onPress={() => {
           setSelectedGroup(item);
           setCurrentStoryIndex(0);
-          setProgress(0);
+          progressAnim.stopAnimation();
+          progressAnim.setValue(0);
         }}
       >
         {/* Story Circle Outline */}
@@ -800,13 +792,33 @@ export default function StatusScreen() {
             <View style={styles.progressHeaderContainer}>
               <View style={styles.progressBarWrapper}>
                 {selectedGroup.stories.map((s: any, idx: number) => {
-                  let fillWidth: any = '0%';
-                  if (idx < currentStoryIndex) fillWidth = '100%';
-                  else if (idx === currentStoryIndex) fillWidth = `${progress * 100}%`;
-                  
+                  if (idx < currentStoryIndex) {
+                    return (
+                      <View key={idx} style={styles.progressBarBg}>
+                        <View style={[styles.progressBarFill, { width: '100%' }]} />
+                      </View>
+                    );
+                  }
+                  if (idx === currentStoryIndex) {
+                    return (
+                      <View key={idx} style={styles.progressBarBg}>
+                        <Animated.View 
+                          style={[
+                            styles.progressBarFill, 
+                            { 
+                              width: progressAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['0%', '100%']
+                              }) 
+                            }
+                          ]} 
+                        />
+                      </View>
+                    );
+                  }
                   return (
                     <View key={idx} style={styles.progressBarBg}>
-                      <View style={[styles.progressBarFill, { width: fillWidth }]} />
+                      <View style={[styles.progressBarFill, { width: '0%' }]} />
                     </View>
                   );
                 })}
@@ -861,8 +873,7 @@ export default function StatusScreen() {
                       key={currentStory._id || `vid_${currentStoryIndex}`}
                       uri={resolvedVideoUri}
                       shouldPlay={selectedGroup !== null}
-                      onDuration={onVideoDuration}
-                      onBufferingChange={onBufferingChange}
+                      onProgress={onVideoProgress}
                       onFinished={handleNextStory}
                     />
                     {currentStory.textContent && (
