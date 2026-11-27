@@ -13,9 +13,8 @@ import { hasSecurityPin } from '../../utils/applock';
 
 const { width } = Dimensions.get('window');
 
-// Where new users download the NOVA APK. Update this to your GitHub Release
-// asset URL (or Google Drive link) once the 140 MB APK is uploaded there.
-const INVITE_DOWNLOAD_URL = 'https://github.com/ansh-axon/nova/releases';
+// Redirects via our live backend /download endpoint to the newest NOVA APK.
+const DEFAULT_DOWNLOAD_URL = 'https://nova-server-wg9p.onrender.com/download';
 
 export const formatLastMessageText = (msg: any): string => {
   if (!msg) return 'No messages yet';
@@ -60,7 +59,7 @@ interface VaultItem {
 }
 
 export default function BentoDashboardScreen() {
-  const { conversations, users, fetchConversations, fetchUsers, startConversation, createGroup, sendMessage, user, loading, logout, lockedChatIds, lockChat, unlockChat, callHistory, fetchCallHistory } = useApp();
+  const { conversations, users, fetchConversations, fetchUsers, startConversation, createGroup, sendMessage, user, serverUrl, loading, logout, lockedChatIds, lockChat, unlockChat, callHistory, fetchCallHistory } = useApp();
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [startingChat, setStartingChat] = useState(false);
@@ -107,7 +106,7 @@ export default function BentoDashboardScreen() {
       message: 'Choose a secure command to execute:',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
-        { text: '🤖 Ask NOVA Agent', onPress: handleStartMetaAI },
+        { text: '✨ Ask NOVA Agent', onPress: handleStartMetaAI },
         { text: '👥 New Group', onPress: () => { setSelectedIds([]); setGroupName(''); setShowNewGroup(true); } },
         { text: '📢 Broadcast', onPress: () => { setSelectedIds([]); setBroadcastText(''); setShowBroadcast(true); } },
         { text: '🚪 Logout', style: 'destructive', onPress: async () => {
@@ -158,9 +157,10 @@ export default function BentoDashboardScreen() {
   // friends can install NOVA and find the inviter by username.
   const handleInviteFriend = async () => {
     const myName = user?.username || user?.displayName || '';
+    const downloadUrl = serverUrl ? `${serverUrl.replace(/\/$/, '')}/download` : DEFAULT_DOWNLOAD_URL;
     const message =
       `Join me on NOVA 🔐 — a private, secure chat app.\n\n` +
-      `📲 Download: ${INVITE_DOWNLOAD_URL}\n` +
+      `📲 Download: ${downloadUrl}\n` +
       (myName ? `👤 Find me: @${myName}\n\n` : '\n') +
       `Let's chat securely on NOVA!`;
     try {
@@ -528,6 +528,11 @@ export default function BentoDashboardScreen() {
                       <View style={[styles.avatarFallback, { backgroundColor: '#1e293b' }]}>
                         <Ionicons name="people" size={26} color="#0df" />
                       </View>
+                    ) : isAI ? (
+                      <Image
+                        source={require('../../../assets/images/icon.png')}
+                        style={styles.avatar}
+                      />
                     ) : avatarUrl ? (
                       <Image
                         source={{ uri: avatarUrl }}

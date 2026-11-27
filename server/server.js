@@ -357,6 +357,13 @@ app.use('/api/calls', require('./routes/calls'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/locker', require('./routes/locker'));
 
+// Latest NOVA Android APK download redirect (updated per build so Invite links
+// always serve the newest APK without needing another rebuild).
+const LATEST_APK_URL = process.env.LATEST_APK_URL || 'https://expo.dev/artifacts/eas/QKeIC0Nbj8RtGXDPEVK1F-W3eQ3YLDMFU4yXVHPXN6U.apk';
+app.get(['/download', '/apk'], (req, res) => {
+  res.redirect(302, LATEST_APK_URL);
+});
+
 // Lightweight keep-alive endpoint. An external free uptime monitor (e.g.
 // UptimeRobot / cron-job.org) hits this every ~10 minutes so the free-tier
 // server never spins down — avoiding the 30-50s cold-start delays.
@@ -401,17 +408,17 @@ const seedMetaAI = async () => {
       metaAI = new User({
         username: 'meta_ai',
         password: hashedPassword,
-        displayName: 'NOVA Agent 🤖',
+        displayName: 'NOVA Agent',
         about: 'Your smart AI agent. Ask me anything!',
         avatarUrl: '',
         publicKey: encryptionKeys.publicKey,
         secretKey: encryptionKeys.secretKey
       });
       await metaAI.save();
-      console.log('--- Seeded NOVA Agent Bot User successfully ---');
-    } else if (metaAI.displayName !== 'NOVA Agent 🤖') {
+      console.log('--- Seeded NOVA Agent User successfully ---');
+    } else if (metaAI.displayName !== 'NOVA Agent') {
       // Rebrand any previously-seeded bot to NOVA Agent
-      metaAI.displayName = 'NOVA Agent 🤖';
+      metaAI.displayName = 'NOVA Agent';
       metaAI.about = 'Your smart AI agent. Ask me anything!';
       await metaAI.save();
       console.log('--- Rebranded AI bot to NOVA Agent ---');

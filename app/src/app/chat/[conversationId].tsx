@@ -1714,7 +1714,12 @@ export default function ChatScreen() {
 
         {/* Recipient Profile Avatar */}
         <TouchableOpacity style={styles.profileTap}>
-          {otherParticipant?.avatarUrl ? (
+          {isAI ? (
+            <Image
+              source={require('../../../assets/images/icon.png')}
+              style={styles.headerAvatar}
+            />
+          ) : otherParticipant?.avatarUrl ? (
             <Image
               source={{ uri: otherParticipant.avatarUrl.startsWith('data:') ? otherParticipant.avatarUrl : `data:image/jpeg;base64,${otherParticipant.avatarUrl}` }}
               style={styles.headerAvatar}
@@ -1735,7 +1740,7 @@ export default function ChatScreen() {
                 : otherUserTyping
                 ? 'typing...'
                 : isAI
-                ? 'NOVA Agent 🤖'
+                ? 'AI Assistant'
                 : otherParticipant?.isOnline
                 ? 'Online'
                 : 'Offline'}

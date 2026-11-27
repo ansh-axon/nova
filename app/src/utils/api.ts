@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import EncryptionUtils from './encryption';
 import { getToken, setToken } from './tokenStore';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://nova-server-wg9p.onrender.com/api';
 
 // Create axios instance
 const api = axios.create({

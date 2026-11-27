@@ -177,11 +177,11 @@ export default function StatusScreen() {
   useEffect(() => {
     const groups: { [userId: string]: any } = {};
 
-    // 1. Always inject a premium, dynamic NOVA Agent 🤖 Greeting status at the top
+    // 1. Always inject a premium, dynamic NOVA Agent Greeting status at the top
     groups['nova_ai'] = {
       id: 'nova_ai',
       userId: 'nova_ai',
-      userName: 'NOVA Agent 🤖',
+      userName: 'NOVA Agent',
       timeAgo: 'Just now',
       avatarUrl: '',
       stories: [
@@ -638,7 +638,9 @@ export default function StatusScreen() {
         {/* Story Circle Outline */}
         <View style={styles.storyCircle}>
           <View style={[styles.storyBorderRing, { borderColor: '#0df' }]}>
-            {item.avatarUrl ? (
+            {item.id === 'nova_ai' ? (
+              <Image source={require('../../../assets/images/icon.png')} style={styles.storyAvatar} />
+            ) : item.avatarUrl ? (
               <Image source={{ uri: item.avatarUrl }} style={styles.storyAvatar} />
             ) : (
               <View style={[styles.storyAvatarFallback, { backgroundColor: '#1e293b' }]}>
@@ -828,7 +830,9 @@ export default function StatusScreen() {
             {/* Story Profile Top Info */}
             <View style={styles.viewerProfileHeader}>
               <View style={styles.viewerAvatarBg}>
-                {selectedGroup.avatarUrl ? (
+                {selectedGroup.id === 'nova_ai' ? (
+                  <Image source={require('../../../assets/images/icon.png')} style={styles.viewerAvatarImg} />
+                ) : selectedGroup.avatarUrl ? (
                   <Image source={{ uri: selectedGroup.avatarUrl }} style={styles.viewerAvatarImg} />
                 ) : (
                   <Text style={styles.viewerAvatarText}>{getInitials(selectedGroup.userName)}</Text>
