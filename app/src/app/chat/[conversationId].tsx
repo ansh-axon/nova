@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal, StatusBar, Dimensions, ImageBackground, Animated, Easing } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Modal, StatusBar, Dimensions, ImageBackground, Animated, Easing, Keyboard } from 'react-native';
 import { showNeonAlert } from '../../components/NeonAlert';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useApp, Message } from '../../context/AppContext';
@@ -697,6 +697,9 @@ export default function ChatScreen() {
   const [eventDesc, setEventDesc] = useState('');
 
   const flatListRef = useRef<FlatList>(null);
+  const scrollOffsetRef = useRef(0);
+  const shouldScrollToBottomRef = useRef(false);
+  const prevMsgCountRef = useRef(0);
   const router = useRouter();
 
   // Find corresponding conversation
@@ -735,16 +738,28 @@ export default function ChatScreen() {
     if (!conversationId) return;
     // Mark this chat active so incoming messages here don't bump the unread badge.
     setActiveConversationId(conversationId);
+    scrollOffsetRef.current = 0;
     const fetchChatData = async () => {
       await loadMessages(conversationId);
       setLoading(false);
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
+      // Inverted FlatList anchors newest messages at offset 0 (right above input).
+      requestAnimationFrame(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: false }));
       // Mark the other person's messages as read (seen) once we open the chat
       markConversationRead(conversationId);
     };
     fetchChatData();
     return () => setActiveConversationId(null);
   }, [conversationId]);
+
+  // Keep newest messages pinned above the input bar when opening the keyboard.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (scrollOffsetRef.current < 160) {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Listen for socket typing events and automatic scrolls
   useEffect(() => {
@@ -808,8 +823,9 @@ export default function ChatScreen() {
       });
     }
 
+    shouldScrollToBottomRef.current = true;
     await sendMessage(conversationId, textToSend);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+    requestAnimationFrame(() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true }));
   };
 
 
@@ -1291,14 +1307,30 @@ export default function ChatScreen() {
   };
 
   const chatMessages = messages[conversationId] || [];
+  const invertedMessages = React.useMemo(
+    () => [...chatMessages].reverse(),
+    [chatMessages]
+  );
 
-  // When new messages arrive while this chat is open, mark them seen immediately
+  // When new messages arrive while this chat is open, mark them seen and keep
+  // the latest messages anchored right above the input bar.
   useEffect(() => {
-    if (!conversationId || chatMessages.length === 0) return;
-    const last = chatMessages[chatMessages.length - 1];
+    const count = chatMessages.length;
+    const grew = count > prevMsgCountRef.current;
+    prevMsgCountRef.current = count;
+    if (!conversationId || count === 0) return;
+
+    const last = chatMessages[count - 1];
     const lastSenderId = typeof last.sender === 'string' ? last.sender : (last.sender as any)?._id || (last.sender as any)?.id;
     if (lastSenderId && lastSenderId !== user?.id) {
       markConversationRead(conversationId);
+    }
+
+    if (grew && (shouldScrollToBottomRef.current || lastSenderId === user?.id || scrollOffsetRef.current < 160)) {
+      shouldScrollToBottomRef.current = false;
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      });
     }
   }, [chatMessages.length, conversationId]);
 
@@ -1524,7 +1556,8 @@ export default function ChatScreen() {
       ? (item.sender === user?.id || item.sender === (user as any)?._id) 
       : ((item.sender as any)?._id === user?.id || (item.sender as any)?.id === user?.id);
     const isEmoji = item.text && isOnlyEmoji(item.text);
-    const prev = index > 0 ? chatMessages[index - 1] : undefined;
+    // invertedMessages is newest-first, so the chronologically older message is at index + 1.
+    const prev = index < invertedMessages.length - 1 ? invertedMessages[index + 1] : undefined;
     const showDaySeparator = isNewDay(item.createdAt, prev?.createdAt);
     const isImage = (item.text && item.text.startsWith('data:image/')) || item.messageType === 'image';
     const isVideo = (item.text && item.text.startsWith('data:video/')) || item.messageType === 'video' || (!!item.mediaUrl && /\.(mp4|mov|mkv|webm|3gp)$/i.test(item.mediaUrl));
@@ -1556,8 +1589,9 @@ export default function ChatScreen() {
       }
     }
 
+    // Single root <View> ensures inverted CellRenderer's column-reverse doesn't flip daySeparator below bubble.
     return (
-      <>
+      <View>
         {showDaySeparator && (
           <View style={styles.daySeparatorRow}>
             <Text style={styles.daySeparatorText}>{formatDaySeparator(item.createdAt)}</Text>
@@ -1650,7 +1684,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         )}
       </View>
-      </>
+      </View>
     );
   };
 
@@ -1701,7 +1735,7 @@ export default function ChatScreen() {
                 : otherUserTyping
                 ? 'typing...'
                 : isAI
-                ? 'Nova AI Bot 🤖'
+                ? 'NOVA Agent 🤖'
                 : otherParticipant?.isOnline
                 ? 'Online'
                 : 'Offline'}
@@ -1818,43 +1852,37 @@ export default function ChatScreen() {
             <ActivityIndicator size="large" color="#0df" />
             <Text style={styles.loaderText}>Syncing conversation...</Text>
           </View>
-        ) : chatWallpaper ? (
-          <ImageBackground source={{ uri: chatWallpaper }} style={{ flex: 1 }} resizeMode="cover">
+        ) : (() => {
+          const messageList = (
             <FlatList
               ref={flatListRef}
-              data={chatMessages}
+              data={invertedMessages}
+              inverted
               keyExtractor={(item) => item._id}
               renderItem={renderMessageItem}
-              contentContainerStyle={[styles.messageStreamContent, { backgroundColor: 'rgba(9, 13, 22, 0.7)' }]}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-              ListHeaderComponent={() => (
+              keyboardShouldPersistTaps="handled"
+              onScroll={(e) => { scrollOffsetRef.current = e.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={16}
+              contentContainerStyle={[
+                styles.messageStreamContent,
+                chatWallpaper ? { backgroundColor: 'rgba(9, 13, 22, 0.7)' } : null,
+              ]}
+              ListFooterComponent={
                 <View style={styles.e2eBanner}>
                   <Ionicons name="lock-closed" size={12} color="#a1a1aa" style={{ marginRight: 6 }} />
                   <Text style={styles.e2eText}>
                     Messages are E2E encrypted and automatically self-destruct after 30 days for maximum security.
                   </Text>
                 </View>
-              )}
+              }
             />
-          </ImageBackground>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={chatMessages}
-            keyExtractor={(item) => item._id}
-            renderItem={renderMessageItem}
-            contentContainerStyle={styles.messageStreamContent}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            ListHeaderComponent={() => (
-              <View style={styles.e2eBanner}>
-                <Ionicons name="lock-closed" size={12} color="#a1a1aa" style={{ marginRight: 6 }} />
-                <Text style={styles.e2eText}>
-                  Messages are E2E encrypted and automatically self-destruct after 30 days for maximum security.
-                </Text>
-              </View>
-            )}
-          />
-        )}
+          );
+          return chatWallpaper ? (
+            <ImageBackground source={{ uri: chatWallpaper }} style={{ flex: 1 }} resizeMode="cover">
+              {messageList}
+            </ImageBackground>
+          ) : messageList;
+        })()}
 
         {showAttachmentMenu && (
           <View style={styles.floatingAttachmentPanel}>
@@ -2339,8 +2367,10 @@ const styles = StyleSheet.create({
   },
   messageStreamContent: {
     paddingHorizontal: 16,
-    paddingVertical: 20,
-    paddingBottom: 40,
+    paddingTop: 12,
+    paddingBottom: 20,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   e2eBanner: {
     flexDirection: 'row',

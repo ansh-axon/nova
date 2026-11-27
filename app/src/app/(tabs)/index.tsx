@@ -107,7 +107,7 @@ export default function BentoDashboardScreen() {
       message: 'Choose a secure command to execute:',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
-        { text: '🤖 Ask NOVA AI', onPress: handleStartMetaAI },
+        { text: '🤖 Ask NOVA Agent', onPress: handleStartMetaAI },
         { text: '👥 New Group', onPress: () => { setSelectedIds([]); setGroupName(''); setShowNewGroup(true); } },
         { text: '📢 Broadcast', onPress: () => { setSelectedIds([]); setBroadcastText(''); setShowBroadcast(true); } },
         { text: '🚪 Logout', style: 'destructive', onPress: async () => {
@@ -293,7 +293,7 @@ export default function BentoDashboardScreen() {
       } else {
         showNeonAlert({
           title: 'AI SYNC',
-          message: 'NOVA AI is starting up. Please try again.',
+          message: 'NOVA Agent is starting up. Please try again.',
           icon: 'information-circle-outline',
           iconColor: '#f59e0b',
           borderColor: '#f59e0b',
@@ -501,7 +501,7 @@ export default function BentoDashboardScreen() {
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={48} color="#334155" />
             <Text style={styles.emptyText}>No chats active yet.</Text>
-            <Text style={styles.emptySubtitle}>Start a chat with Nova AI or search other users below!</Text>
+            <Text style={styles.emptySubtitle}>Start a chat with NOVA Agent or search other users below!</Text>
           </View>
         ) : (
           <View style={styles.chatsListWrapper}>

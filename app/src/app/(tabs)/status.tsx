@@ -177,11 +177,11 @@ export default function StatusScreen() {
   useEffect(() => {
     const groups: { [userId: string]: any } = {};
 
-    // 1. Always inject a premium, dynamic Nova AI 🤖 Greeting status at the top
+    // 1. Always inject a premium, dynamic NOVA Agent 🤖 Greeting status at the top
     groups['nova_ai'] = {
       id: 'nova_ai',
       userId: 'nova_ai',
-      userName: 'Nova AI 🤖',
+      userName: 'NOVA Agent 🤖',
       timeAgo: 'Just now',
       avatarUrl: '',
       stories: [
