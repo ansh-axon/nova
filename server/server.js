@@ -359,7 +359,7 @@ app.use('/api/locker', require('./routes/locker'));
 
 // Latest NOVA Android APK download redirect (updated per build so Invite links
 // always serve the newest APK without needing another rebuild).
-const LATEST_APK_URL = process.env.LATEST_APK_URL || 'https://expo.dev/artifacts/eas/QKeIC0Nbj8RtGXDPEVK1F-W3eQ3YLDMFU4yXVHPXN6U.apk';
+const LATEST_APK_URL = process.env.LATEST_APK_URL || 'https://expo.dev/artifacts/eas/wjWvn2WU0wDOLwJPc6rWic_7geqTc47AJSEcztE0u1M.apk';
 app.get(['/download', '/apk'], (req, res) => {
   res.redirect(302, LATEST_APK_URL);
 });
